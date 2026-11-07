@@ -43,47 +43,52 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ サーバー混雑対策版：自動リトライ付き通信処理
+# ⚙️ UI連動型：自動リトライ付き通信処理
 # ==========================================
-def generate_text_safe(api_key: str, prompt: str) -> str:
+def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) -> str:
     client = genai.Client(api_key=api_key)
-    
-    # 確実に存在する最新モデルを指定
     model_name = "gemini-3.8-flash"
     
-    max_retries = 5   # 最大5回まで自動で再試行
-    wait_time = 2     # 最初の待機時間は2秒
+    max_retries = 3   # 待ち時間を減らすため、最大3回で打ち切り
+    wait_time = 3     # 3秒待機からスタート
 
     for attempt in range(max_retries):
         try:
+            if attempt > 0:
+                status_box.write(f"🔄 {task_name}: サーバー混雑のため再試行しています... ({attempt}/{max_retries-1}回目)")
+                
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt
             )
+            
             if response and response.text:
+                if attempt > 0:
+                    status_box.write(f"✅ {task_name}: 通信に成功しました！")
                 return response.text.strip()
                 
         except Exception as e:
             error_msg = str(e)
             
-            # 503エラー (一時的な混雑) や 429エラー (レート制限) の場合は待機してリトライ
+            # 503エラー (一時的な混雑) や 429エラー (レート制限) の場合
             if "503" in error_msg or "UNAVAILABLE" in error_msg or "429" in error_msg:
                 if attempt < max_retries - 1:
+                    status_box.write(f"⏳ サーバー高負荷（503）を検知しました。{wait_time}秒待機してリトライします...")
                     time.sleep(wait_time)
-                    wait_time *= 2  # 待機時間を2秒→4秒→8秒と延ばしてサーバー負荷を軽減
+                    wait_time += 2  # 3秒 → 5秒 と少しだけ待機を延ばす
                     continue
                 else:
-                    raise Exception(f"Googleサーバーの混雑が続いているため処理を中断しました。時間をおいて再度お試しください。（詳細: {error_msg}）")
+                    raise Exception(f"Googleサーバーの混雑が解消されませんでした。数分〜数十分おいてから再度お試しください。")
             else:
                 # その他の致命的なエラー（APIキー間違いなど）は即終了
-                raise Exception(f"APIエラーが発生しました。\n詳細: [{model_name}] {error_msg}")
+                raise Exception(f"APIエラーが発生しました。\n詳細: {error_msg}")
 
     raise Exception("不明なエラーで生成に失敗しました。")
 
 # ==========================================
 # 2. Gemini API 連携 (Mermaid図解 ＆ Q&A生成)
 # ==========================================
-def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[str, str]]:
+def generate_interview_qa(api_key: str, profile: StudentProfile, status_box) -> List[Dict[str, str]]:
     exp_text = "\n".join([f"- {e.category} ({e.period}): {e.title} / 得た強み: {', '.join(e.skills_acquired)}" for e in profile.experiences])
     es_text = "\n".join([f"- ES軸: {es.title} / 関連経験: {es.focus_experience}" for es in profile.es_points])
     hr_text = f"活用したい社内制度: {profile.hr_systems.education_system}" if profile.hr_systems.education_system else "活用したい社内制度: 一般的な制度（異動制度、研修制度、キャリア開発・配置換えなど）"
@@ -129,7 +134,7 @@ def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[st
     ]
     prompt = "\n".join(prompt_lines)
 
-    text = generate_text_safe(api_key, prompt)
+    text = generate_text_safe(api_key, prompt, "Q&Aの生成", status_box)
     
     # 確実なJSON抽出
     start_idx = text.find('[')
@@ -144,7 +149,7 @@ def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[st
     else:
         raise Exception("AIの回答からJSONデータが見つかりませんでした。")
 
-def generate_mermaid_by_ai(api_key: str, profile: StudentProfile) -> str:
+def generate_mermaid_by_ai(api_key: str, profile: StudentProfile, status_box) -> str:
     exp_text = "\n".join([f"- {e.title} / 得た強み: {', '.join(e.skills_acquired)}" for e in profile.experiences])
     es_text = "\n".join([f"- {es.title} / 関連経験: {es.focus_experience}" for es in profile.es_points])
     hr_text = profile.hr_systems.education_system if profile.hr_systems.education_system else "一般的な社内制度（異動制度、研修制度、配置換え）"
@@ -199,7 +204,7 @@ def generate_mermaid_by_ai(api_key: str, profile: StudentProfile) -> str:
     ]
     prompt = "\n".join(prompt_lines)
 
-    text = generate_text_safe(api_key, prompt)
+    text = generate_text_safe(api_key, prompt, "図解の生成", status_box)
     
     # MermaidのMarkdownブロックがついてしまった場合の除去
     if text.startswith("```mermaid"):
@@ -346,7 +351,7 @@ def main():
         # --- ステップ1 実行 ---
         status_box.write("⚙️ ステップ 1/2: ルート航図（Mermaid図解）を設計中...")
         try:
-            mermaid_res = generate_mermaid_by_ai(clean_api_key, profile)
+            mermaid_res = generate_mermaid_by_ai(clean_api_key, profile, status_box)
         except Exception as e1:
             status_box.update(label="❌ ステップ1でエラーが発生しました", state="error", expanded=True)
             st.error(f"図解の生成に失敗しました。\n詳細: {e1}")
@@ -355,7 +360,7 @@ def main():
         # --- ステップ2 実行 ---
         status_box.write("⚙️ ステップ 2/2: AI面接対策 8つのQ&Aを生成中...")
         try:
-            qa_res = generate_interview_qa(clean_api_key, profile)
+            qa_res = generate_interview_qa(clean_api_key, profile, status_box)
         except Exception as e2:
             status_box.update(label="❌ ステップ2でエラーが発生しました", state="error", expanded=True)
             st.error(f"Q&Aの生成に失敗しました。\n詳細: {e2}")
