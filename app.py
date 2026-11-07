@@ -5,6 +5,7 @@ import io
 import html
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 
@@ -45,32 +46,8 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# 📄 直接PDF生成ユーティリティ (マップ図解 & 面接対策)
+# 📄 面接対策 Q&A 用 直接PDF生成 (ReportLab)
 # ==========================================
-def build_map_pdf_direct(mermaid_code: str) -> Optional[bytes]:
-    """Kroki APIを利用してMermaid図解を完全なPDFバイナリとして直接生成する"""
-    try:
-        url = "https://kroki.io/mermaid/pdf"
-        headers = {'Content-Type': 'text/plain; charset=utf-8'}
-        res = requests.post(url, data=mermaid_code.encode('utf-8'), headers=headers, timeout=12)
-        if res.status_code == 200 and len(res.content) > 0:
-            return res.content
-    except Exception:
-        pass
-    
-    # 予備: mermaid.ink のPDFレンダリングAPIを試行
-    try:
-        import base64
-        encoded = base64.b64encode(mermaid_code.encode('utf-8')).decode('utf-8')
-        url_ink = f"https://mermaid.ink/pdf/{encoded}"
-        res_ink = requests.get(url_ink, timeout=12)
-        if res_ink.status_code == 200 and len(res_ink.content) > 0:
-            return res_ink.content
-    except Exception:
-        pass
-        
-    return None
-
 def build_qa_pdf(company_name: str, target_job: str, qa_results: list) -> Optional[bytes]:
     """面接対策Q&Aを直接PDFバイナリとして生成"""
     try:
@@ -572,53 +549,24 @@ def main():
         st.subheader("🗺️ ルート航図（Mermaid図解）")
         st.markdown("```mermaid\n" + mermaid_code + "\n```")
 
-        # 📄 直接PDFダウンロード（Kroki / Mermaid.ink 変換）
-        map_pdf_bytes = build_map_pdf_direct(mermaid_code)
-
-        if map_pdf_bytes:
-            st.download_button(
-                label="🗺️ 「ルート航図（マップ図解）」をPDFで直接ダウンロード",
-                data=map_pdf_bytes,
-                file_name=f"ルート航図_マップ_{company_label}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-        else:
-            # 予備: HTML保存用フォールバック
-            html_map_lines = [
-                "<!DOCTYPE html>",
-                "<html lang='ja'>",
-                "<head>",
-                "    <meta charset='utf-8'>",
-                "    <title>ルート航図マップ</title>",
-                "    <script src='https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js'></script>",
-                "    <script>mermaid.initialize({startOnLoad:true});</script>",
-                "    <style>",
-                "        body { font-family: sans-serif; padding: 30px; text-align: center; background-color: #ffffff; color: #333; }",
-                "        h1 { color: #1976D2; font-size: 24px; margin-bottom: 5px; }",
-                "        .sub { color: #666; font-size: 14px; margin-bottom: 25px; }",
-                "        .mermaid { display: inline-block; margin-top: 10px; max-width: 100%; }",
-                "        .btn-print { padding: 12px 28px; background-color: #1976D2; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 15px; cursor: pointer; margin-bottom: 25px; }",
-                "        @media print { .btn-print { display: none !important; } body { padding: 0; } @page { size: A4 landscape; margin: 10mm; } }",
-                "    </style>",
-                "</head>",
-                "<body>",
-                "    <button class='btn-print' onclick='window.print()'>📄 この図解マップをPDF保存</button>",
-                f"    <h1>ルート航図（Root Mapping）</h1>",
-                f"    <div class='sub'>志望企業・業界: {company_label} | 希望職種: {saved_job}</div>",
-                "    <div class='mermaid'>",
-                mermaid_code,
-                "    </div>",
-                "</body>",
-                "</html>"
-            ]
-            st.download_button(
-                label="🗺️ 「ルート航図（HTML保存版）」をダウンロード",
-                data="\n".join(html_map_lines),
-                file_name=f"ルート航図_マップ_{company_label}.html",
-                mime="text/html",
-                use_container_width=True
-            )
+        # 📄 ワンクリックでブラウザの「PDFとして保存」画面を開く埋め込みボタン
+        components.html(
+            """
+            <button onclick="window.parent.print()" style="
+                width: 100%;
+                padding: 12px 24px;
+                background-color: #1976D2;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                cursor: pointer;
+                font-size: 15px;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+            ">📄 ワンクリックで画面（図解＆Q&A）をPDF保存する</button>
+            """,
+            height=50
+        )
 
         st.markdown("---")
 
@@ -646,7 +594,7 @@ def main():
         else:
             st.error("面接対策データの読み込みに失敗しました。リトライしてください。")
 
-        # 📄 面接対策Q&Aの直接PDFデータ作成
+        # 📄 面接対策Q&Aの直接PDFデータ作成 (ReportLab)
         qa_pdf_bytes = build_qa_pdf(saved_company, saved_job, qa_results)
 
         # ⬇️ 【全8つのQ&A出力完了の直下に配置】面接対策PDF ＆ テキスト保存ボタン
@@ -654,7 +602,7 @@ def main():
         with col_qa_1:
             if qa_pdf_bytes:
                 st.download_button(
-                    label="📄 「面接対策Q&A」をPDFでダウンロード",
+                    label="📄 「面接対策Q&Aのみ」をPDFで直接ダウンロード",
                     data=qa_pdf_bytes,
                     file_name=f"ルート航図_面接対策_{company_label}.pdf",
                     mime="application/pdf",
