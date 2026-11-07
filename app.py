@@ -1,10 +1,11 @@
 import os
 import json
 import time
-import requests  # 通信モジュール
+import io
+import requests
 import streamlit as st
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 # ==========================================
 # 1. データモデル定義
@@ -43,48 +44,153 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ 利用可能モデル自動取得 & 通信処理
+# 📄 PDF生成ユーティリティ (ReportLab)
+# ==========================================
+def generate_pdf_bytes(title: str, subtitle: str, content_blocks: List[Dict[str, str]]) -> Optional[bytes]:
+    """ReportLabを使用して日本語対応PDFバイナリを出力する"""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+
+        pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKaku-W5'))
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=36,
+            leftMargin=36,
+            topMargin=36,
+            bottomMargin=36
+        )
+        
+        styles = getSampleStyleSheet()
+        
+        title_style = ParagraphStyle(
+            'DocTitle',
+            fontName='HeiseiKaku-W5',
+            fontSize=16,
+            leading=20,
+            textColor=colors.HexColor('#1976D2'),
+            spaceAfter=6
+        )
+        sub_style = ParagraphStyle(
+            'DocSub',
+            fontName='HeiseiKaku-W5',
+            fontSize=10,
+            leading=14,
+            textColor=colors.HexColor('#555555'),
+            spaceAfter=12
+        )
+        h2_style = ParagraphStyle(
+            'SectionH2',
+            fontName='HeiseiKaku-W5',
+            fontSize=12,
+            leading=16,
+            textColor=colors.HexColor('#0D47A1'),
+            spaceBefore=10,
+            spaceAfter=4
+        )
+        body_style = ParagraphStyle(
+            'BodyTextCustom',
+            fontName='HeiseiKaku-W5',
+            fontSize=9.5,
+            leading=14,
+            textColor=colors.HexColor('#212121'),
+            spaceAfter=4
+        )
+        advice_style = ParagraphStyle(
+            'AdviceCustom',
+            fontName='HeiseiKaku-W5',
+            fontSize=9,
+            leading=13,
+            textColor=colors.HexColor('#2E7D32'),
+            spaceAfter=8
+        )
+
+        story = []
+        story.append(Paragraph(title, title_style))
+        if subtitle:
+            story.append(Paragraph(subtitle, sub_style))
+        story.append(Spacer(1, 8))
+        
+        for block in content_blocks:
+            b_type = block.get("type")
+            text = block.get("text", "").replace("\n", "<br/>")
+            
+            if b_type == "heading":
+                story.append(Paragraph(text, h2_style))
+            elif b_type == "question":
+                story.append(Paragraph(f"<b>【面接官の質問】</b><br/>{text}", body_style))
+            elif b_type == "answer":
+                story.append(Paragraph(f"<b>【回答案】</b><br/>{text}", body_style))
+            elif b_type == "advice":
+                story.append(Paragraph(f"💡 <b>【アドバイス】</b><br/>{text}", advice_style))
+                story.append(Spacer(1, 4))
+            elif b_type == "text":
+                story.append(Paragraph(text, body_style))
+                
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+    except Exception as e:
+        st.warning(f"PDF作成時にエラーが発生しました (要 reportlab パッケージ): {e}")
+        return None
+
+# ==========================================
+# ⚙️ 爆速・自動最適化 API 通信処理
 # ==========================================
 def get_available_models(api_key: str) -> List[str]:
-    """APIキーで利用可能なモデル一覧を動的に取得し、最適順に並び替える"""
+    """利用可能モデルを取得し、TTS/Image等の不適合モデルを排除して成功実績モデルを最優先配置"""
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-        res = requests.get(url, timeout=10)
+        res = requests.get(url, timeout=5)
         if res.status_code == 200:
             data = res.json()
             models = []
             for m in data.get("models", []):
                 methods = m.get("supportedGenerationMethods", [])
-                if "generateContent" in methods:
-                    name = m.get("name", "").replace("models/", "")
-                    if name:
-                        models.append(name)
+                name = m.get("name", "").replace("models/", "")
+                # generateContent対応かつ、音声・画像・埋め込み等テキスト生成非対応を除外
+                if "generateContent" in methods and not any(k in name for k in ["tts", "embedding", "bison", "imagen", "audio"]):
+                    models.append(name)
             
-            # 無料枠で制限の緩い 'flash' モデルを最優先にし、'pro' モデルは制限にかかりやすいため後回しにする
-            flash_models = [m for m in models if "flash" in m]
-            other_models = [m for m in models if "flash" not in m and "pro" not in m]
-            pro_models = [m for m in models if "pro" in m]
+            # 高速かつ動作成功実績の高いモデルを最優先にする
+            priority_order = [
+                "gemini-flash-lite-latest",
+                "gemini-1.5-flash",
+                "gemini-flash-latest",
+                "gemini-3.8-flash",
+                "gemini-2.0-flash"
+            ]
             
-            sorted_models = flash_models + other_models + pro_models
+            sorted_models = []
+            for p in priority_order:
+                if p in models:
+                    sorted_models.append(p)
+            for m in models:
+                if m not in sorted_models:
+                    sorted_models.append(m)
+                    
             if sorted_models:
                 return sorted_models
     except Exception:
         pass
     
-    # 動的取得失敗時のデフォルト候補
-    return ["gemini-3.8-flash", "gemini-2.5-flash"]
+    return ["gemini-flash-lite-latest", "gemini-1.5-flash", "gemini-flash-latest", "gemini-3.8-flash"]
 
 def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) -> str:
     models_to_try = get_available_models(api_key)
-    status_box.write(f"🔍 利用可能なAIモデル ({len(models_to_try)}件) を検出しました。")
-    
     last_error = ""
 
     for model_name in models_to_try:
-        status_box.write(f"🤖 モデル [{model_name}] へ接続試行中...")
+        status_box.write(f"🤖 モデル [{model_name}] へ接続中...")
         
-        max_retries = 4
-        wait_time = 3
+        max_retries = 3
+        wait_time = 2
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
         headers = {'Content-Type': 'application/json'}
@@ -95,18 +201,18 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    status_box.write(f"🔄 {task_name}: [{model_name}] 再試行中... ({attempt}/{max_retries-1}回目, {wait_time}秒待機)")
+                    status_box.write(f"🔄 {task_name}: [{model_name}] 再接続中... ({attempt}/{max_retries-1}回目)")
                     
-                response = requests.post(url, headers=headers, json=payload, timeout=45)
+                response = requests.post(url, headers=headers, json=payload, timeout=35)
                 
                 if response.status_code == 200:
                     data = response.json()
                     try:
                         text = data['candidates'][0]['content']['parts'][0]['text']
-                        status_box.write(f"✅ {task_name}: [{model_name}] で生成成功！")
+                        status_box.write(f"✅ {task_name}: [{model_name}] で即座に生成成功！")
                         return text.strip()
                     except (KeyError, IndexError):
-                        last_error = "レスポンスの解析に失敗しました。"
+                        last_error = "レスポンス解析エラー"
                         status_box.write(f"⚠️ [{model_name}] レスポンス形式エラー。")
                         break
                         
@@ -117,16 +223,16 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
                     if response.status_code in [503, 500]:
                         if attempt < max_retries - 1:
                             time.sleep(wait_time)
-                            wait_time *= 2  # 3s -> 6s -> 12s
+                            wait_time *= 2
                             continue
                         else:
-                            status_box.write(f"⚠️ [{model_name}] 混雑中 ({response.status_code})。別のモデルへ移行します。")
+                            status_box.write(f"⚠️ [{model_name}] 混雑のため次のモデルへ切り替えます。")
                             break
                     elif response.status_code == 429:
-                        status_box.write(f"⚠️ [{model_name}] 利用制限（クオータ超過）のためスキップします。")
+                        status_box.write(f"⚠️ [{model_name}] 利用制限超過のためスキップします。")
                         break
                     elif response.status_code in [404, 403, 400]:
-                        status_box.write(f"⚠️ [{model_name}] HTTP {response.status_code} で拒否されました。")
+                        status_box.write(f"⚠️ [{model_name}] HTTP {response.status_code} スキップ。")
                         break
                     else:
                         status_box.write(f"⚠️ [{model_name}] 通信エラー ({response.status_code})。")
@@ -135,12 +241,11 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
             except requests.exceptions.RequestException as e:
                 last_error = f"ネットワークエラー: {str(e)}"
                 if attempt < max_retries - 1:
-                    status_box.write(f"⚠️ [{model_name}] 通信遅延/タイムアウト。{wait_time}秒後に再接続します...")
                     time.sleep(wait_time)
                     wait_time *= 2
                     continue
                 else:
-                    status_box.write(f"⚠️ [{model_name}] 接続失敗が続いたため次のモデルへ切り替えます。")
+                    status_box.write(f"⚠️ [{model_name}] タイムアウト。次へ。")
                     break
 
     raise Exception(f"すべてのAIモデルで通信に失敗しました。\n最後のエラー詳細: {last_error}")
@@ -442,9 +547,6 @@ def main():
         saved_company = st.session_state.target_company
         saved_job = st.session_state.target_job
 
-        map_file_name = "ルート航図_マップ.html"
-        qa_file_name = "ルート航図_面接対策.txt"
-
         st.success("🎉 あなた専用のオリジナル・ルート航図が完成しました！")
         st.info("💡 **アドバイス:** 出力されたルート航図（Root Mapping）を頭に入れて、想定外の質問にも一貫性をもって答えましょう！")
         
@@ -453,6 +555,7 @@ def main():
             
         st.markdown("```mermaid\n" + mermaid_code + "\n```")
 
+        # HTMLマップファイルの作成（印刷ボタン付）
         company_name_html = saved_company if saved_company else 'キャリア設計'
         html_lines = [
             "<!DOCTYPE html>",
@@ -466,9 +569,12 @@ def main():
             "        body { font-family: sans-serif; padding: 20px; text-align: center; background-color: #ffffff; }",
             "        h1 { color: #333; }",
             "        .mermaid { display: inline-block; margin-top: 20px; }",
+            "        .btn-print { margin-bottom: 20px; padding: 10px 20px; background-color: #1976D2; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }",
+            "        @media print { .btn-print { display: none; } }",
             "    </style>",
             "</head>",
             "<body>",
+            "    <button class='btn-print' onclick='window.print()'>📄 このページをPDFで保存 / 印刷</button>",
             f"    <h1>ルート航図マップ（{company_name_html}）</h1>",
             "    <div class='mermaid'>",
             mermaid_code,
@@ -478,17 +584,39 @@ def main():
         ]
         html_map_content = "\n".join(html_lines)
 
-        st.download_button(
-            label="📥 ルート航図（マップHTML）を保存する",
-            data=html_map_content,
-            file_name=map_file_name,
-            mime="text/html"
+        col_map_1, col_map_2 = st.columns(2)
+        with col_map_1:
+            st.download_button(
+                label="📥 ルート航図（マップHTML）を保存する",
+                data=html_map_content,
+                file_name="ルート航図_マップ.html",
+                mime="text/html"
+            )
+
+        # マップPDFデータの作成
+        map_pdf_blocks = [
+            {"type": "heading", "text": "■ ルート航図（Mermaid構造定義コード）"},
+            {"type": "text", "text": mermaid_code}
+        ]
+        map_pdf_bytes = generate_pdf_bytes(
+            title=f"【Root Mapping】ルート航図構造書（{company_name_html}）",
+            subtitle=f"志望職種: {saved_job}",
+            content_blocks=map_pdf_blocks
         )
+        if map_pdf_bytes:
+            with col_map_2:
+                st.download_button(
+                    label="📄 ルート航図（PDF）をダウンロードする",
+                    data=map_pdf_bytes,
+                    file_name="ルート航図_マップ.pdf",
+                    mime="application/pdf"
+                )
 
         st.markdown("---")
         st.header("💡 AI面接対策 Q&A（8つの主要テーマ）")
         
         download_text = f"【Root Mapping キャリアシート】\n志望企業: {saved_company}\n希望職種: {saved_job}\n\n■ 面接対策Q&A\n"
+        qa_pdf_blocks = []
 
         if isinstance(qa_results, list) and len(qa_results) > 0:
             for i, qa in enumerate(qa_results):
@@ -504,18 +632,43 @@ def main():
                 st.markdown("---")
                     
                 download_text += f"\n--- {theme} ---\n質問: {question}\n回答: {answer}\nアドバイス: {advice}\n"
+                
+                qa_pdf_blocks.append({"type": "heading", "text": f"📌 {theme}"})
+                qa_pdf_blocks.append({"type": "question", "text": question})
+                qa_pdf_blocks.append({"type": "answer", "text": answer})
+                qa_pdf_blocks.append({"type": "advice", "text": advice})
         else:
             st.error("面接対策データの読み込みに失敗しました。リトライしてください。")
 
         st.subheader("📄 結果の保存・PDF化")
-        st.info("💡 **PDFとして保存・印刷する場合:** ブラウザで **`Ctrl` + `P`** （Macは `Cmd` + `P`）を押してください。送信先を「PDFに保存」に切り替えることで綺麗なPDFになります。")
         
-        st.download_button(
-            label="📥 面接対策Q&Aをテキスト保存する",
-            data=download_text,
-            file_name=qa_file_name,
-            mime="text/plain"
+        col_qa_1, col_qa_2 = st.columns(2)
+        
+        # 面接対策 PDF バイトデータ作成
+        qa_pdf_bytes = generate_pdf_bytes(
+            title="【Root Mapping】面接対策 Q&A シート",
+            subtitle=f"志望企業: {saved_company} | 希望職種: {saved_job}",
+            content_blocks=qa_pdf_blocks
         )
+        
+        if qa_pdf_bytes:
+            with col_qa_1:
+                st.download_button(
+                    label="📄 面接対策Q&A（PDF）をダウンロードする",
+                    data=qa_pdf_bytes,
+                    file_name="ルート航図_面接対策.pdf",
+                    mime="application/pdf"
+                )
+        
+        with col_qa_2:
+            st.download_button(
+                label="📥 面接対策Q&A（テキスト）を保存する",
+                data=download_text,
+                file_name="ルート航図_面接対策.txt",
+                mime="text/plain"
+            )
+            
+        st.info("💡 **Web画面全体を直接PDF化したい場合:** ブラウザで `Ctrl + P` （Macは `Cmd + P`）を押し、送信先を「PDFに保存」に切り替えて保存することも可能です。")
 
 if __name__ == "__main__":
     main()
