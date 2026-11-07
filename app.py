@@ -43,21 +43,18 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ 超安定版：API通信とモデル選択
+# ⚙️ サーバー混雑対策版：自動リトライ付き通信処理
 # ==========================================
 def generate_text_safe(api_key: str, prompt: str) -> str:
     client = genai.Client(api_key=api_key)
     
-    # 🌟 エラーメッセージの指示通り、最新の推奨モデルを指定！
-    candidate_models = [
-        "gemini-3.8-flash",
-        "gemini-3.8-pro",
-        "gemini-exp-1206" # 代替の最新実験モデル
-    ]
+    # 確実に存在する最新モデルを指定
+    model_name = "gemini-3.8-flash"
     
-    errors = []
+    max_retries = 5   # 最大5回まで自動で再試行
+    wait_time = 2     # 最初の待機時間は2秒
 
-    for model_name in candidate_models:
+    for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
                 model=model_name,
@@ -65,15 +62,23 @@ def generate_text_safe(api_key: str, prompt: str) -> str:
             )
             if response and response.text:
                 return response.text.strip()
+                
         except Exception as e:
-            # エラー内容を記録し、0.5秒待機して次のモデルへ
-            errors.append(f"[{model_name}]: {str(e)}")
-            time.sleep(0.5)
-            continue
+            error_msg = str(e)
             
-    # 全モデルが失敗した場合は、全てのエラー履歴を出力して原因特定を容易にする
-    error_msg = " / ".join(errors)
-    raise Exception(f"利用可能なモデルが見つかりませんでした。\n詳細: {error_msg}")
+            # 503エラー (一時的な混雑) や 429エラー (レート制限) の場合は待機してリトライ
+            if "503" in error_msg or "UNAVAILABLE" in error_msg or "429" in error_msg:
+                if attempt < max_retries - 1:
+                    time.sleep(wait_time)
+                    wait_time *= 2  # 待機時間を2秒→4秒→8秒と延ばしてサーバー負荷を軽減
+                    continue
+                else:
+                    raise Exception(f"Googleサーバーの混雑が続いているため処理を中断しました。時間をおいて再度お試しください。（詳細: {error_msg}）")
+            else:
+                # その他の致命的なエラー（APIキー間違いなど）は即終了
+                raise Exception(f"APIエラーが発生しました。\n詳細: [{model_name}] {error_msg}")
+
+    raise Exception("不明なエラーで生成に失敗しました。")
 
 # ==========================================
 # 2. Gemini API 連携 (Mermaid図解 ＆ Q&A生成)
@@ -126,7 +131,7 @@ def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[st
 
     text = generate_text_safe(api_key, prompt)
     
-    # 確実なJSON抽出（AIが前後に余計な文章を入れても '[' から ']' までを強制的に切り出す）
+    # 確実なJSON抽出
     start_idx = text.find('[')
     end_idx = text.rfind(']')
     
@@ -135,9 +140,9 @@ def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[st
         try:
             return json.loads(json_str)
         except json.JSONDecodeError as e:
-            raise Exception(f"JSONの解析に失敗しました。出力形式が乱れています。\n詳細: {e}\n抽出テキスト: {json_str}")
+            raise Exception(f"JSONの解析に失敗しました。\n詳細: {e}")
     else:
-        raise Exception(f"AIの回答からJSON配列が見つかりませんでした。\nAIの生の出力:\n{text}")
+        raise Exception("AIの回答からJSONデータが見つかりませんでした。")
 
 def generate_mermaid_by_ai(api_key: str, profile: StudentProfile) -> str:
     exp_text = "\n".join([f"- {e.title} / 得た強み: {', '.join(e.skills_acquired)}" for e in profile.experiences])
@@ -422,7 +427,6 @@ def main():
         
         download_text = f"【Root Mapping キャリアシート】\n志望企業: {saved_company}\n希望職種: {saved_job}\n\n■ 面接対策Q&A\n"
 
-        # 確実に出力するための精査ロジック
         if isinstance(qa_results, list) and len(qa_results) > 0:
             for i, qa in enumerate(qa_results):
                 theme = qa.get('theme', f'テーマ {i+1}')
