@@ -134,9 +134,12 @@ def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[st
 
     try:
         text = generate_text_with_auto_model(client, prompt)
-        if text.startswith("```json"): text = text[7:]
-        if text.startswith("```"): text = text[3:]
-        if text.endswith("```"): text = text[:-3]
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
         return json.loads(text.strip())
     except Exception as e:
         return [{"error": str(e)}]
@@ -200,6 +203,26 @@ def generate_mermaid_by_ai(api_key: str, profile: StudentProfile) -> str:
 
     try:
         text = generate_text_with_auto_model(client, prompt)
-        if text.startswith("```mermaid"): text = text[10:]
-        elif text.startswith("```"): text = text[3:]
-        if text.endswith("```"): text = text[:-3]
+        if text.startswith("```mermaid"):
+            text = text[10:]
+        elif text.startswith("```"):
+            text = text[3:]
+            
+        if text.endswith("```"):
+            text = text[:-3]
+            
+        return text.strip()
+    except Exception as e:
+        return f"flowchart BT\nError[\"APIエラーが発生しました<br/>{str(e)}\"]"
+
+# ==========================================
+# 3. Streamlit UI構築
+# ==========================================
+def main():
+    st.set_page_config(page_title="Root Mapping & AI Career Coach", layout="wide")
+
+    st.markdown("""
+        <style>
+        @media print {
+            [data-testid="stSidebar"], form, .stButton, .stDownloadButton, header, footer { display: none !important; }
+            @page { size: A4
