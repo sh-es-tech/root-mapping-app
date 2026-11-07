@@ -43,24 +43,37 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ 予備モデル自動切り替え付き通信処理
+# ⚙️ 全モデル総当たり型通信処理 (404/403回避)
 # ==========================================
 def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) -> str:
     client = genai.Client(api_key=api_key)
     
-    # 本命がダメだった時のための「予備モデル」リスト（上から順に試す）
-    models_to_try = ["gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    # API環境によって受け付けるモデル名が異なるため、あらゆるバリエーションを網羅
+    models_to_try = [
+        "gemini-1.5-flash-002",
+        "gemini-1.5-flash-001",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-pro-002",
+        "gemini-1.5-pro-001",
+        "gemini-1.5-pro-latest",
+        "gemini-1.5-pro",
+        "gemini-pro"
+    ]
     
-    max_retries = 3
+    max_retries = 2 # 混雑時のリトライは2回にし、サクサク次のモデルを試す
+    last_error = ""
 
     for model_name in models_to_try:
-        status_box.write(f"🤖 モデル [{model_name}] に接続しています...")
-        wait_time = 3  # モデルごとに待機時間をリセット
+        status_box.write(f"🤖 モデル [{model_name}] をテスト中...")
+        wait_time = 2
         
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    status_box.write(f"🔄 {task_name}: [{model_name}] 混雑のため再試行中... ({attempt}/{max_retries-1}回目)")
+                    status_box.write(f"🔄 {task_name}: [{model_name}] 混雑再試行... ({attempt}/{max_retries-1})")
                     
                 response = client.models.generate_content(
                     model=model_name,
@@ -68,35 +81,35 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
                 )
                 
                 if response and response.text:
-                    if attempt > 0 or model_name != models_to_try[0]:
-                        status_box.write(f"✅ {task_name}: [{model_name}] で通信に成功しました！")
+                    status_box.write(f"✅ {task_name}: [{model_name}] で接続成功！")
                     return response.text.strip()
                     
             except Exception as e:
                 error_msg = str(e)
+                last_error = error_msg
                 
-                # 503エラー (一時的な混雑) や 429エラー (レート制限) の場合
-                if "503" in error_msg or "UNAVAILABLE" in error_msg or "429" in error_msg:
+                # 503 (混雑) や 429 (制限) の場合は少し待ってリトライ
+                if "503" in error_msg or "UNAVAILABLE" in error_msg or "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
                     if attempt < max_retries - 1:
-                        status_box.write(f"⏳ [{model_name}] 高負荷（503）。{wait_time}秒待機してリトライします...")
                         time.sleep(wait_time)
                         wait_time += 2
                         continue
                     else:
-                        status_box.write(f"⚠️ [{model_name}] は混雑が解消しません。別の予備モデルに切り替えます。")
-                        break # 現在のモデルを諦めて、次のモデルへ（for loop を抜ける）
+                        status_box.write(f"⚠️ [{model_name}] は混雑中のためスキップします。")
+                        break # このモデルは諦めて次へ
                         
-                # 404エラー (その環境でモデルが使えない) の場合
-                elif "404" in error_msg or "NOT_FOUND" in error_msg:
-                    status_box.write(f"⚠️ [{model_name}] は利用できないため、別の予備モデルに切り替えます。")
-                    break # 現在のモデルを諦めて、次のモデルへ
+                # 404 (見つからない), 403 (権限なし), 400 (不正な要求) の場合はリトライせず即スキップ
+                elif "404" in error_msg or "NOT_FOUND" in error_msg or "403" in error_msg or "400" in error_msg:
+                    status_box.write(f"⏭️ [{model_name}] は環境に適応していないためスキップします。")
+                    break # このモデルは諦めて次へ
                     
                 else:
-                    # その他の致命的なエラー（APIキー間違いなど）は即終了
-                    raise Exception(f"APIエラーが発生しました。\n詳細: {error_msg}")
+                    # その他の予期せぬエラーも一旦スキップして次を試す
+                    status_box.write(f"⚠️ [{model_name}] で不明なエラー。次を試します。")
+                    break
 
-    # すべてのモデルが失敗した場合
-    raise Exception("すべてのAIモデルが混雑しているか、利用できませんでした。時間をおいて再度お試しください。")
+    # 全モデルが全滅した場合
+    raise Exception(f"すべてのAIモデルが利用できませんでした。APIキーの設定や権限をご確認ください。\n最後のエラー詳細: {last_error}")
 
 # ==========================================
 # 2. Gemini API 連携 (Mermaid図解 ＆ Q&A生成)
