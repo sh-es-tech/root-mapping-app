@@ -1,7 +1,7 @@
 import os
 import json
 import time
-import requests  # ← Google SDKの代わりに標準の通信モジュールを使用します
+import requests  # 通信モジュール
 import streamlit as st
 from dataclasses import dataclass, field
 from typing import List, Dict
@@ -43,10 +43,9 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ Direct REST API 通信処理（SDKのバグを完全回避）
+# ⚙️ Direct REST API 通信処理（エラー詳細を出力）
 # ==========================================
 def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) -> str:
-    # 安定稼働している確実なモデルに絞ってトライします
     models_to_try = [
         "gemini-1.5-flash",
         "gemini-2.0-flash-exp",
@@ -61,7 +60,6 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
         status_box.write(f"🤖 モデル [{model_name}] へ直接通信を試みています...")
         wait_time = 2
         
-        # 最も安定している v1beta のエンドポイントを直接叩く
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
         headers = {'Content-Type': 'application/json'}
         payload = {
@@ -73,7 +71,6 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
                 if attempt > 0:
                     status_box.write(f"🔄 {task_name}: [{model_name}] 混雑再試行... ({attempt}/{max_retries-1})")
                     
-                # SDKを使わず標準的なHTTPリクエストを送信
                 response = requests.post(url, headers=headers, json=payload, timeout=40)
                 
                 if response.status_code == 200:
@@ -85,33 +82,35 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
                     except (KeyError, IndexError):
                         last_error = "レスポンスの形式が想定外、またはAIの安全フィルターでブロックされました。"
                         status_box.write(f"⚠️ [{model_name}] 出力がブロックされました。次を試します。")
-                        break # 次のモデルへ
+                        break
                         
                 else:
                     error_msg = response.text
                     last_error = f"HTTP {response.status_code}: {error_msg}"
                     
+                    # 混雑（503, 429）の場合
                     if response.status_code in [503, 429]:
                         if attempt < max_retries - 1:
                             time.sleep(wait_time)
                             wait_time += 2
                             continue
                         else:
-                            status_box.write(f"⚠️ [{model_name}] は混雑中のためスキップします。")
+                            status_box.write(f"⚠️ [{model_name}] 混雑エラー: HTTP {response.status_code} - {error_msg}")
                             break
+                    # クライアントエラー（404, 403, 400）の場合に隠さずエラー全文を表示する
                     elif response.status_code in [404, 403, 400]:
-                        status_box.write(f"⏭️ [{model_name}] は非対応のためスキップします。")
+                        status_box.write(f"⚠️ [{model_name}] エラー詳細: HTTP {response.status_code} - {error_msg}")
                         break
                     else:
-                        status_box.write(f"⚠️ [{model_name}] 通信エラー ({response.status_code})。次へ。")
+                        status_box.write(f"⚠️ [{model_name}] 通信エラー: HTTP {response.status_code} - {error_msg}")
                         break
                         
             except requests.exceptions.RequestException as e:
                 last_error = f"ネットワークエラー: {str(e)}"
-                status_box.write(f"⚠️ [{model_name}] 接続失敗。次を試します。")
+                status_box.write(f"⚠️ [{model_name}] 接続失敗 ({str(e)})。次を試します。")
                 break
 
-    raise Exception(f"すべてのAIモデルで通信に失敗しました。APIキーが有効かご確認ください。\n最後のエラー詳細: {last_error}")
+    raise Exception(f"すべてのAIモデルで通信に失敗しました。\n最後のエラー詳細: {last_error}")
 
 # ==========================================
 # 2. Gemini API 連携 (Mermaid図解 ＆ Q&A生成)
