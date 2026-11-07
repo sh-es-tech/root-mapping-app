@@ -43,13 +43,23 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ シンプル版：直接APIを叩く処理（通信フリーズ防止）
+# ⚙️ 超安定版：環境に合わせたモデル名を網羅して試す処理
 # ==========================================
 def generate_text_safe(api_key: str, prompt: str) -> str:
     client = genai.Client(api_key=api_key)
     
-    # 安定して使えるモデルを順番に試す（リスト取得通信によるフリーズを防止）
-    candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    # 404エラー対策：環境によって要求される詳細なバージョン名を網羅
+    candidate_models = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-exp",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash-002",
+        "gemini-1.5-flash-001",
+        "gemini-pro"  # 最終手段（最も古くからあり確実に動くモデル）
+    ]
+    
     last_exception = None
 
     for model_name in candidate_models:
@@ -62,10 +72,12 @@ def generate_text_safe(api_key: str, prompt: str) -> str:
                 return response.text.strip()
         except Exception as e:
             last_exception = e
-            time.sleep(1)
+            # エラーの場合は0.5秒待ってから次のモデル名を試す
+            time.sleep(0.5)
             continue
             
-    raise Exception(f"APIエラー: {last_exception}")
+    # 全てのモデル名で失敗した場合のみエラーを出す
+    raise Exception(f"利用可能なモデルが見つかりませんでした。詳細: {last_exception}")
 
 # ==========================================
 # 2. Gemini API 連携 (Mermaid図解 ＆ Q&A生成)
@@ -229,7 +241,6 @@ def main():
         if user_password:
             st.error("❌ パスワードが違います")
         else:
-            # パスワード自体は伏せ、案内のみに変更しました
             st.info("💡 ご利用には管理者から案内されたパスワードの入力が必要です。")
         st.stop()
     else:
