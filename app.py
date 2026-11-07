@@ -147,7 +147,7 @@ def build_qa_pdf(company_name: str, target_job: str, qa_results: list) -> Option
         return None
 
 # ==========================================
-# ⚙️ 自動最適化 API 通信処理 (賢いモデルを優先)
+# ⚙️ 自動最適化 API 通信処理
 # ==========================================
 def get_available_models(api_key: str) -> List[str]:
     try:
@@ -386,37 +386,73 @@ def main():
     st.set_page_config(page_title="Root Mapping & AI Career Coach", layout="wide")
 
     logo_filename = None
-    possible_logos = ["logo.jepeg", "logo.jpeg", "logo.jpg", "logo.png", "logo.JEPEG", "logo.JPEG", "logo.JPG", "logo.PNG"]
+    possible_logos = ["logo.jpeg", "logo.jpg", "logo.png", "logo.JPEG", "logo.JPG", "logo.PNG"]
     for fn in possible_logos:
         if os.path.exists(fn):
             logo_filename = fn
             break
 
-    if logo_filename:
-        st.image(logo_filename, width=500)
+    # ==========================================
+    # 🔒 新・ログイン画面（画像デザイン準拠）
+    # ==========================================
+    if "is_authenticated" not in st.session_state:
+        st.session_state.is_authenticated = False
 
-    st.title("Root Mapping（ルート航図）作成ツール")
-    # ↓ 指定通りに修正した箇所です
-    st.caption("※「ルート航図」は登録商標（35類、41類、42類）出願中です。")
-
-    st.markdown("---")
-
-    st.subheader("🔑 アクセス認証")
-    user_password = st.text_input("パスワードを入力してください", type="password", key="main_pass")
-
-    if user_password != "hizume_lab":
-        if user_password:
-            st.error("❌ パスワードが違います")
-        else:
-            st.info("💡 ご利用には管理者から案内されたパスワードの入力が必要です。")
+    if not st.session_state.is_authenticated:
+        # 画面を3つのカラムに分けて中央寄せのレイアウトを作成
+        col1, col2, col3 = st.columns([1, 2, 1])
+        
+        with col2:
+            if logo_filename:
+                # 画像の幅をカラムに合わせる
+                st.image(logo_filename, use_container_width=True)
+            
+            # 画像デザインを忠実に再現したタイトル・サブタイトル・セパレータ
+            st.markdown("""
+                <div style="text-align: center; padding: 20px 0 10px 0;">
+                    <h1 style="color: #27437D; font-size: 2.6rem; font-weight: bold; line-height: 1.3; margin-bottom: 20px;">
+                        The Root Mapping<br>Interview Method
+                    </h1>
+                    <p style="font-size: 1.1rem; color: #4A4A4A; font-weight: 500; margin-bottom: 15px;">
+                        面接を突破するためのAIアドバイザー
+                    </p>
+                    <div style="width: 20px; height: 1.5px; background-color: #333333; margin: 0 auto 30px auto;"></div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            # ログインフォームとボタンの配置
+            with st.form("login_form"):
+                user_password = st.text_input("モニター用パスワードを入力してください", type="password")
+                submit_btn = st.form_submit_button("ログイン")
+                
+                if submit_btn:
+                    if user_password == "hizume_lab":
+                        st.session_state.is_authenticated = True
+                        st.rerun()  # 認証成功時に画面をリロードしてメインアプリへ
+                    else:
+                        st.error("❌ パスワードが違います")
+        
+        # 認証されていない場合はここで処理をストップ
         st.stop()
-    else:
-        st.success("✅ 認証完了（ご利用いただけます）")
 
+    # ==========================================
+    # 🔓 ログイン成功後のメインアプリ画面
+    # ==========================================
+    
+    if logo_filename:
+        st.image(logo_filename, width=300)
+        
+    st.caption("※「ルート航図」は登録商標（35類、41類、42類）出願中です。")
+    st.success("✅ ログインしました（ご利用いただけます）")
     st.markdown("---")
 
-    # 🔒 安全対策済み APIキー制御処理
-    secrets_api_key = st.secrets.get("GEMINI_API_KEY", "") if hasattr(st, "secrets") else ""
+    # 🔒 安全対策済み APIキー制御処理 (エラー回避強化)
+    secrets_api_key = ""
+    try:
+        if "GEMINI_API_KEY" in st.secrets:
+            secrets_api_key = st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        pass  # secretsファイルが無くてもエラーにしない
 
     with st.sidebar:
         st.header("⚙️ API設定")
@@ -507,7 +543,6 @@ def main():
         st.markdown("---")
         status_box = st.status("🚀 処理を開始します...", expanded=True)
         
-        # --- ステップ1 実行 ---
         status_box.write("⚙️ ステップ 1/2: ルート航図（Mermaid図解）を設計中...")
         try:
             mermaid_res = generate_mermaid_by_ai(clean_api_key, profile, status_box)
@@ -516,7 +551,6 @@ def main():
             st.error(f"図解の生成に失敗しました。\n詳細: {e1}")
             st.stop()
 
-        # --- ステップ2 実行 ---
         status_box.write("⚙️ ステップ 2/2: AI面接対策 8つのQ&Aを生成中...")
         try:
             qa_res = generate_interview_qa(clean_api_key, profile, status_box)
@@ -525,7 +559,6 @@ def main():
             st.error(f"Q&Aの生成に失敗しました。\n詳細: {e2}")
             st.stop()
 
-        # --- 完了 ---
         status_box.update(label="✅ 生成完了！", state="complete", expanded=False)
 
         st.session_state.mermaid_code = mermaid_res
@@ -533,6 +566,7 @@ def main():
         st.session_state.target_company = target_company.strip()
         st.session_state.target_job = target_job
         st.session_state.generated = True
+        st.rerun() # 生成直後に画面を綺麗にリロード
 
     # ==========================================
     # 4. 生成結果の表示エリア（図解 ＆ Q&A）
@@ -546,17 +580,10 @@ def main():
 
         st.success("🎉 あなた専用のオリジナル・ルート航図が完成しました！")
         st.info("💡 **アドバイス:** 出力されたルート航図（Root Mapping）を頭に入れて、想定外の質問にも一貫性をもって答えましょう！")
-        
-        if logo_filename:
-            st.image(logo_filename, width=350)
 
-        # ------------------------------------------
-        # 🗺️ セクション1: ルート航図（Mermaid図解）
-        # ------------------------------------------
         st.subheader("🗺️ ルート航図（Mermaid図解）")
         st.markdown("```mermaid\n" + mermaid_code + "\n```")
 
-        # 📄 ワンクリックで画面のPDF保存を直接呼び出す埋め込みボタン
         components.html(
             """
             <button onclick="window.parent.print()" style="
@@ -577,9 +604,6 @@ def main():
 
         st.markdown("---")
 
-        # ------------------------------------------
-        # 💡 セクション2: AI面接対策 Q&A
-        # ------------------------------------------
         st.header("💡 AI面接対策 Q&A（8つの主要テーマ）")
         
         download_text = f"【Root Mapping キャリアシート】\n志望企業: {saved_company}\n希望職種: {saved_job}\n\n■ 面接対策Q&A\n"
@@ -601,7 +625,6 @@ def main():
         else:
             st.error("面接対策データの読み込みに失敗しました。リトライしてください。")
 
-        # 📄 面接対策Q&Aの直接PDFデータ作成 (ReportLab)
         qa_pdf_bytes = build_qa_pdf(saved_company, saved_job, qa_results)
 
         col_qa_1, col_qa_2 = st.columns(2)
