@@ -223,21 +223,35 @@ def main():
         </style>
     """, unsafe_allow_html=True)
 
+    # ロゴ画像判定
+    logo_filename = None
+    possible_logos = ["logo.jepeg", "logo.jpeg", "logo.jpg", "logo.png", "logo.JEPEG", "logo.JPEG", "logo.JPG", "logo.PNG"]
+    for fn in possible_logos:
+        if os.path.exists(fn):
+            logo_filename = fn
+            break
+
+    # パスワード入力前でもロゴとタイトルをメイン画面に表示
+    if logo_filename:
+        st.image(logo_filename, width=500)
+
+    st.title("Root Mapping（ルート航図）作成ツール")
+    st.caption("※「ルート航図」「Root Mapping」は登録商標（35類、41類、42類）出願中です。")
+
     # 🔒 パスワード認証機能
     with st.sidebar:
         st.header("🔑 アクセス認証")
         user_password = st.text_input("パスワードを入力してください", type="password")
-        
-        if user_password != "hizume_lab":
-            if user_password:
-                st.error("❌ パスワードが違います")
-            else:
-                st.info("💡 左側サイドバーにパスワードを入力してください")
-            st.warning("🔒 ご利用にはテスト用パスワード（`hizume_lab`）の入力が必要です。")
-            st.stop()
-        else:
-            st.success("✅ 認証完了")
 
+    if user_password != "hizume_lab":
+        if user_password:
+            st.error("❌ パスワードが違います")
+        st.warning("🔒 ご利用には左側サイドバーでテスト用パスワード（`hizume_lab`）の入力が必要です。")
+        st.info("👈 左側のメニュー（サイドバー）を開き、パスワードを入力してください。")
+        st.stop()
+
+    with st.sidebar:
+        st.success("✅ 認証完了")
         st.markdown("---")
         st.header("⚙️ API設定")
         default_api_key = st.secrets.get("GEMINI_API_KEY", "") if hasattr(st, "secrets") else ""
@@ -251,19 +265,6 @@ def main():
         st.session_state.qa_results = []
         st.session_state.target_company = ""
         st.session_state.target_job = ""
-
-    logo_filename = None
-    possible_logos = ["logo.jepeg", "logo.jpeg", "logo.jpg", "logo.png", "logo.JEPEG", "logo.JPEG", "logo.JPG", "logo.PNG"]
-    for fn in possible_logos:
-        if os.path.exists(fn):
-            logo_filename = fn
-            break
-            
-    if logo_filename:
-        st.image(logo_filename, width=500)
-
-    st.title("Root Mapping（ルート航図）作成ツール")
-    st.caption("※「ルート航図」「Root Mapping」は登録商標（35類、41類、42類）出願中です。")
 
     st.header("1. 基本情報・プロファイル入力")
     with st.form("profile_form"):
@@ -359,3 +360,76 @@ def main():
 
     if st.session_state.generated:
         mermaid_code = st.session_state.mermaid_code
+        qa_results = st.session_state.qa_results
+        saved_company = st.session_state.target_company
+        saved_job = st.session_state.target_job
+
+        map_file_name = "ルート航図_マップ.html"
+        qa_file_name = "ルート航図_面接対策.txt"
+
+        st.success("🎉 あなた専用のオリジナル・ルート航図が完成しました！")
+        st.info("💡 **アドバイス:** 出力されたルート航図（Root Mapping）を頭に入れて、想定外の質問にも根拠を提示して答えましょう！")
+        
+        if logo_filename:
+            st.image(logo_filename, width=350)
+            
+        st.markdown(f"```mermaid\n{mermaid_code}\n```")
+
+        html_map_content = f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8">
+    <title>ルート航図マップ</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({{startOnLoad:true}});</script>
+    <style>
+        body {{ font-family: sans-serif; padding: 20px; text-align: center; background-color: #ffffff; }}
+        h1 {{ color: #333; }}
+        .mermaid {{ display: inline-block; margin-top: 20px; }}
+    </style>
+</head>
+<body>
+    <h1>ルート航図マップ（{saved_company if saved_company else 'キャリア設計'}）</h1>
+    <div class="mermaid">
+{mermaid_code}
+    </div>
+</body>
+</html>"""
+
+        st.download_button(
+            label="📥 ルート航図（マップHTML）を保存する",
+            data=html_map_content,
+            file_name=map_file_name,
+            mime="text/html"
+        )
+
+        st.markdown("---")
+        st.header("💡 AI面接対策 Q&A（8つの主要テーマ）")
+        
+        download_text = f"【Root Mapping キャリアシート】\n志望企業: {saved_company}\n希望職種: {saved_job}\n\n■ 面接対策Q&A\n"
+
+        if qa_results and "error" not in qa_results[0]:
+            for i, qa in enumerate(qa_results):
+                st.subheader(f"📌 {qa.get('theme', f'テーマ {i+1}')}")
+                st.markdown(f"**🤖 面接官:**\n「{qa.get('question', '')}」")
+                st.markdown(f"**🗣️ 回答案:**\n{qa.get('answer_script', '')}")
+                st.info(f"**💡 アドバイス:**\n{qa.get('advice', '')}")
+                st.markdown("---")
+                    
+                download_text += f"\n--- {qa.get('theme', '')} ---\n質問: {qa.get('question', '')}\n回答: {qa.get('answer_script', '')}\nアドバイス: {qa.get('advice', '')}\n"
+        else:
+            err_msg = qa_results[0].get("error", "不明なエラー") if qa_results else "生成エラー"
+            st.error(f"面接対策の生成中にエラーが発生しました。（エラー内容: {err_msg}）")
+
+        st.subheader("📄 結果の保存・PDF化")
+        st.info("💡 **PDFとして保存・印刷する場合:** ブラウザで **`Ctrl` + `P`** （Macは `Cmd` + `P`）を押してください。送信先を「PDFに保存」に切り替えることで綺麗なPDFになります。")
+        
+        st.download_button(
+            label="📥 面接対策Q&Aをテキスト保存する",
+            data=download_text,
+            file_name=qa_file_name,
+            mime="text/plain"
+        )
+
+if __name__ == "__main__":
+    main()
