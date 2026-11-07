@@ -43,23 +43,47 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ 混雑耐性強化版：Direct REST API 通信処理
+# ⚙️ 利用可能モデル自動取得 & 通信処理
 # ==========================================
+def get_available_models(api_key: str) -> List[str]:
+    """APIキーで利用可能なモデル一覧を動的に取得し、最適順に並び替える"""
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+        res = requests.get(url, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            models = []
+            for m in data.get("models", []):
+                methods = m.get("supportedGenerationMethods", [])
+                if "generateContent" in methods:
+                    name = m.get("name", "").replace("models/", "")
+                    if name:
+                        models.append(name)
+            
+            # 無料枠で制限の緩い 'flash' モデルを最優先にし、'pro' モデルは制限にかかりやすいため後回しにする
+            flash_models = [m for m in models if "flash" in m]
+            other_models = [m for m in models if "flash" not in m and "pro" not in m]
+            pro_models = [m for m in models if "pro" in m]
+            
+            sorted_models = flash_models + other_models + pro_models
+            if sorted_models:
+                return sorted_models
+    except Exception:
+        pass
+    
+    # 動的取得失敗時のデフォルト候補
+    return ["gemini-3.8-flash", "gemini-2.5-flash"]
+
 def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) -> str:
-    # 無料枠で確実に利用可能なFlashモデルを最優先
-    models_to_try = [
-        "gemini-3.8-flash",
-        "gemini-3.8-flash-lite",
-        "gemini-3.1-pro-preview"
-    ]
+    models_to_try = get_available_models(api_key)
+    status_box.write(f"🔍 利用可能なAIモデル ({len(models_to_try)}件) を検出しました。")
     
     last_error = ""
 
     for model_name in models_to_try:
-        status_box.write(f"🤖 モデル [{model_name}] へ通信中...")
+        status_box.write(f"🤖 モデル [{model_name}] へ接続試行中...")
         
-        # Flashモデルの場合は混雑（503）を粘り強く待つ設定
-        max_retries = 5 if "flash" in model_name else 2
+        max_retries = 4
         wait_time = 3
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
@@ -71,9 +95,9 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    status_box.write(f"🔄 {task_name}: [{model_name}] 混雑のため再試行中... ({attempt}/{max_retries-1}回目, {wait_time}秒待機)")
+                    status_box.write(f"🔄 {task_name}: [{model_name}] 再試行中... ({attempt}/{max_retries-1}回目, {wait_time}秒待機)")
                     
-                response = requests.post(url, headers=headers, json=payload, timeout=40)
+                response = requests.post(url, headers=headers, json=payload, timeout=45)
                 
                 if response.status_code == 200:
                     data = response.json()
@@ -90,19 +114,19 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
                     error_msg = response.text
                     last_error = f"HTTP {response.status_code}: {error_msg}"
                     
-                    if response.status_code == 503:
+                    if response.status_code in [503, 500]:
                         if attempt < max_retries - 1:
                             time.sleep(wait_time)
-                            wait_time *= 2  # 指数バックオフ (3s -> 6s -> 12s -> 24s)
+                            wait_time *= 2  # 3s -> 6s -> 12s
                             continue
                         else:
-                            status_box.write(f"⚠️ [{model_name}] 混雑が続いています。予備モデルへ移行します。")
+                            status_box.write(f"⚠️ [{model_name}] 混雑中 ({response.status_code})。別のモデルへ移行します。")
                             break
                     elif response.status_code == 429:
-                        status_box.write(f"⚠️ [{model_name}] 無料枠の利用制限（クオータ超過）を検知しました。")
+                        status_box.write(f"⚠️ [{model_name}] 利用制限（クオータ超過）のためスキップします。")
                         break
                     elif response.status_code in [404, 403, 400]:
-                        status_box.write(f"⚠️ [{model_name}] HTTP {response.status_code} - {error_msg}")
+                        status_box.write(f"⚠️ [{model_name}] HTTP {response.status_code} で拒否されました。")
                         break
                     else:
                         status_box.write(f"⚠️ [{model_name}] 通信エラー ({response.status_code})。")
@@ -110,8 +134,14 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
                         
             except requests.exceptions.RequestException as e:
                 last_error = f"ネットワークエラー: {str(e)}"
-                status_box.write(f"⚠️ [{model_name}] 接続失敗。次を試します。")
-                break
+                if attempt < max_retries - 1:
+                    status_box.write(f"⚠️ [{model_name}] 通信遅延/タイムアウト。{wait_time}秒後に再接続します...")
+                    time.sleep(wait_time)
+                    wait_time *= 2
+                    continue
+                else:
+                    status_box.write(f"⚠️ [{model_name}] 接続失敗が続いたため次のモデルへ切り替えます。")
+                    break
 
     raise Exception(f"すべてのAIモデルで通信に失敗しました。\n最後のエラー詳細: {last_error}")
 
