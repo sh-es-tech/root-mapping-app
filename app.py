@@ -48,13 +48,11 @@ class StudentProfile:
 def generate_text_safe(api_key: str, prompt: str) -> str:
     client = genai.Client(api_key=api_key)
     
-    # 現在のGoogle APIで確実に稼働する最新・安定モデルのみをリストアップ
+    # 🌟 エラーメッセージの指示通り、最新の推奨モデルを指定！
     candidate_models = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "gemini-1.5-flash-8b"
+        "gemini-3.8-flash",
+        "gemini-3.8-pro",
+        "gemini-exp-1206" # 代替の最新実験モデル
     ]
     
     errors = []
