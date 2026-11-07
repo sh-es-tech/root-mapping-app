@@ -94,7 +94,6 @@ def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[st
     st_goals_str = ', '.join(profile.career_vision.short_term_goals)
     ml_goals_str = ', '.join(profile.career_vision.mid_long_goals)
 
-    # リスト結合による最も安全なプロンプト作成方式
     prompt_lines = [
         "あなたはプロのキャリアアドバイザーです。以下の学生のプロフィールをもとに、面接官がしそうな質問と、学生が答えるべき回答案、およびアドバイスを生成してください。",
         "必ず以下の8つのテーマ全てについて生成し、指定のJSON形式で出力してください。Markdownのコードブロックで囲まないで、純粋なJSON配列のみを出力してください。",
@@ -152,7 +151,6 @@ def generate_mermaid_by_ai(api_key: str, profile: StudentProfile) -> str:
     ml_goals = ', '.join(profile.career_vision.mid_long_goals)
     vision = profile.career_vision.ultimate_vision
     
-    # リスト結合による最も安全なプロンプト作成方式
     prompt_lines = [
         "あなたはキャリア設計のプロであり、Mermaid記法（flowchart BT）を用いた図解の専門家です。",
         "学生のプロフィールを分析し、経験、強み、入社後の目標、最終ビジョンがどのように有機的に結びついているかを、因果関係を踏まえてMermaidのコードで出力してください。",
@@ -205,11 +203,3 @@ def generate_mermaid_by_ai(api_key: str, profile: StudentProfile) -> str:
         if text.startswith("```mermaid"): text = text[10:]
         elif text.startswith("```"): text = text[3:]
         if text.endswith("```"): text = text[:-3]
-        return text.strip()
-    except Exception as e:
-        return f"flowchart BT\nError[\"APIエラーが発生しました<br/>{str(e)}\"]"
-
-# ==========================================
-# 3. Streamlit UI構築
-# ==========================================
-def main():
