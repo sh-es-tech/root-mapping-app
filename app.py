@@ -229,7 +229,8 @@ def main():
         if user_password:
             st.error("❌ パスワードが違います")
         else:
-            st.info("💡 ご利用にはテスト用パスワード（`hizume_lab`）の入力が必要です。")
+            # パスワード自体は伏せ、案内のみに変更しました
+            st.info("💡 ご利用には管理者から案内されたパスワードの入力が必要です。")
         st.stop()
     else:
         st.success("✅ 認証完了（ご利用いただけます）")
