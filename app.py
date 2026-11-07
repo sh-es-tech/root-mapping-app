@@ -3,7 +3,6 @@ import json
 import time
 import requests
 import streamlit as st
-import streamlit.components.v1 as components
 from dataclasses import dataclass, field
 from typing import List, Dict
 
@@ -283,17 +282,6 @@ def generate_mermaid_by_ai(api_key: str, profile: StudentProfile, status_box) ->
 def main():
     st.set_page_config(page_title="Root Mapping & AI Career Coach", layout="wide")
 
-    css_lines = [
-        "<style>",
-        "@media print {",
-        "    [data-testid='stSidebar'], form, .stButton, .stDownloadButton, header, footer { display: none !important; }",
-        "    @page { size: A4 landscape; margin: 10mm; }",
-        "    .main .block-container { max-width: 100% !important; padding: 0 !important; }",
-        "}",
-        "</style>"
-    ]
-    st.markdown("\n".join(css_lines), unsafe_allow_html=True)
-
     logo_filename = None
     possible_logos = ["logo.jepeg", "logo.jpeg", "logo.jpg", "logo.png", "logo.JEPEG", "logo.JPEG", "logo.JPG", "logo.PNG"]
     for fn in possible_logos:
@@ -449,14 +437,16 @@ def main():
         
         if logo_filename:
             st.image(logo_filename, width=350)
-            
-        st.markdown("```mermaid\n" + mermaid_code + "\n```")
 
         # ------------------------------------------
-        # ① ルート航図マップの保存・PDF出力エリア
+        # 🗺️ セクション1: ルート航図（Mermaid図解）
         # ------------------------------------------
+        st.subheader("🗺️ ルート航図（Mermaid図解）")
+        st.markdown("```mermaid\n" + mermaid_code + "\n```")
+
+        # HTMLマップファイルの作成
         company_name_html = saved_company if saved_company else 'キャリア設計'
-        html_lines = [
+        html_map_lines = [
             "<!DOCTYPE html>",
             "<html lang='ja'>",
             "<head>",
@@ -465,54 +455,44 @@ def main():
             "    <script src='https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js'></script>",
             "    <script>mermaid.initialize({startOnLoad:true});</script>",
             "    <style>",
-            "        body { font-family: sans-serif; padding: 20px; text-align: center; background-color: #ffffff; }",
-            "        h1 { color: #333; }",
-            "        .mermaid { display: inline-block; margin-top: 20px; }",
-            "        .btn-print { margin-bottom: 20px; padding: 10px 20px; background-color: #1976D2; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; }",
-            "        @media print { .btn-print { display: none !important; } }",
+            "        body { font-family: sans-serif; padding: 30px; text-align: center; background-color: #ffffff; color: #333; }",
+            "        h1 { color: #1976D2; font-size: 22px; margin-bottom: 5px; }",
+            "        .sub { color: #666; font-size: 14px; margin-bottom: 20px; }",
+            "        .mermaid { display: inline-block; margin-top: 10px; max-width: 100%; }",
+            "        .btn-print { padding: 12px 24px; background-color: #1976D2; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; cursor: pointer; margin-bottom: 20px; }",
+            "        .btn-print:hover { background-color: #1565C0; }",
+            "        @media print { .btn-print { display: none !important; } body { padding: 0; } @page { size: A4 landscape; margin: 10mm; } }",
             "    </style>",
             "</head>",
             "<body>",
-            "    <button class='btn-print' onclick='window.print()'>📄 このルート航図をPDFで保存する</button>",
-            f"    <h1>ルート航図マップ（{company_name_html}）</h1>",
+            "    <button class='btn-print' onclick='window.print()'>📄 図解マップのみをPDF保存 / 印刷</button>",
+            f"    <h1>ルート航図（Root Mapping）</h1>",
+            f"    <div class='sub'>志望企業・業界: {company_name_html} | 希望職種: {saved_job}</div>",
             "    <div class='mermaid'>",
             mermaid_code,
             "    </div>",
             "</body>",
             "</html>"
         ]
-        html_map_content = "\n".join(html_lines)
+        html_map_content = "\n".join(html_map_lines)
 
-        col_map_1, col_map_2 = st.columns(2)
-        with col_map_1:
-            st.download_button(
-                label="📥 ルート航図（マップHTML）を保存する",
-                data=html_map_content,
-                file_name="ルート航図_マップ.html",
-                mime="text/html"
-            )
-        with col_map_2:
-            # JavaScript連動のワンクリックPDFダイアログ起動ボタン
-            components.html(
-                """
-                <button onclick="window.parent.print()" style="
-                    width: 100%;
-                    padding: 0.5rem 1rem;
-                    background-color: #4CAF50;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    font-weight: bold;
-                    cursor: pointer;
-                    font-size: 14px;
-                ">📄 画面全体をワンクリックPDF保存</button>
-                """,
-                height=45
-            )
+        # ⬇️ 【図解表示の直下に配置】図解保存用ボタン
+        st.download_button(
+            label="🗺️ 「出力された図（マップ）のみ」を保存・PDF化する",
+            data=html_map_content,
+            file_name=f"ルート航図_マップ_{company_name_html}.html",
+            mime="text/html",
+            use_container_width=True
+        )
 
         st.markdown("---")
+
+        # ------------------------------------------
+        # 💡 セクション2: AI面接対策 Q&A
+        # ------------------------------------------
         st.header("💡 AI面接対策 Q&A（8つの主要テーマ）")
         
+        qa_cards_html = ""
         download_text = f"【Root Mapping キャリアシート】\n志望企業: {saved_company}\n希望職種: {saved_job}\n\n■ 面接対策Q&A\n"
 
         if isinstance(qa_results, list) and len(qa_results) > 0:
@@ -529,39 +509,66 @@ def main():
                 st.markdown("---")
                     
                 download_text += f"\n--- {theme} ---\n質問: {question}\n回答: {answer}\nアドバイス: {advice}\n"
+                
+                qa_cards_html += f"""
+                <div class="qa-card">
+                    <div class="qa-theme">{theme}</div>
+                    <div class="q-box">🤖 質問: 「{question}」</div>
+                    <div class="a-box">🗣️ <b>回答案:</b><br/>{answer}</div>
+                    <div class="advice-box">💡 <b>アドバイス:</b> {advice}</div>
+                </div>
+                """
         else:
             st.error("面接対策データの読み込みに失敗しました。リトライしてください。")
 
-        # ------------------------------------------
-        # ② 面接対策の保存・PDF出力エリア
-        # ------------------------------------------
-        st.subheader("📄 結果の保存・PDF出力")
-        
+        # HTML面接対策ファイルの作成
+        html_qa_lines = [
+            "<!DOCTYPE html>",
+            "<html lang='ja'>",
+            "<head>",
+            "    <meta charset='utf-8'>",
+            "    <title>面接対策Q&Aシート</title>",
+            "    <style>",
+            "        body { font-family: sans-serif; padding: 30px; max-width: 800px; margin: 0 auto; background-color: #ffffff; color: #333; line-height: 1.6; }",
+            "        h1 { color: #0D47A1; border-bottom: 3px solid #1976D2; padding-bottom: 8px; font-size: 20px; }",
+            "        .meta { color: #555; font-size: 13px; margin-bottom: 20px; background: #f8f9fa; padding: 8px 12px; border-radius: 4px; }",
+            "        .qa-card { border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 18px; padding: 15px; page-break-inside: avoid; }",
+            "        .qa-theme { font-weight: bold; color: #1565C0; font-size: 15px; margin-bottom: 8px; border-left: 4px solid #1976D2; padding-left: 8px; }",
+            "        .q-box { background: #e3f2fd; padding: 8px 12px; border-radius: 4px; margin-bottom: 8px; font-weight: bold; color: #0d47a1; font-size: 14px; }",
+            "        .a-box { padding: 4px 0 8px 0; font-size: 13.5px; color: #212121; }",
+            "        .advice-box { background: #f1f8e9; border-left: 3px solid #388e3c; padding: 6px 10px; border-radius: 4px; font-size: 12.5px; color: #1b5e20; }",
+            "        .btn-print { width: 100%; padding: 12px; background-color: #2E7D32; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; cursor: pointer; margin-bottom: 20px; }",
+            "        .btn-print:hover { background-color: #1b5e20; }",
+            "        @media print { .btn-print { display: none !important; } body { padding: 0; max-width: 100%; } @page { size: A4 portrait; margin: 15mm; } }",
+            "    </style>",
+            "</head>",
+            "<body>",
+            "    <button class='btn-print' onclick='window.print()'>📄 面接対策シートのみをPDF保存 / 印刷</button>",
+            "    <h1>【Root Mapping】AI面接対策 Q&Aシート</h1>",
+            f"    <div class='meta'><strong>志望企業:</strong> {company_name_html} | <strong>希望職種:</strong> {saved_job}</div>",
+            qa_cards_html,
+            "</body>",
+            "</html>"
+        ]
+        html_qa_content = "\n".join(html_qa_lines)
+
+        # ⬇️ 【全8つのQ&A出力完了の直下に配置】面接対策保存用ボタン
         col_qa_1, col_qa_2 = st.columns(2)
         with col_qa_1:
             st.download_button(
-                label="📥 面接対策Q&A（テキスト）を保存する",
-                data=download_text,
-                file_name="ルート航図_面接対策.txt",
-                mime="text/plain"
+                label="📄 「面接対策Q&Aのみ」を保存・PDF化する",
+                data=html_qa_content,
+                file_name=f"ルート航図_面接対策_{company_name_html}.html",
+                mime="text/html",
+                use_container_width=True
             )
         with col_qa_2:
-            # 面接対策結果専用のワンクリックPDF保存ボタン
-            components.html(
-                """
-                <button onclick="window.parent.print()" style="
-                    width: 100%;
-                    padding: 0.5rem 1rem;
-                    background-color: #1976D2;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    font-weight: bold;
-                    cursor: pointer;
-                    font-size: 14px;
-                ">📄 面接対策シートをワンクリックPDF保存</button>
-                """,
-                height=45
+            st.download_button(
+                label="📥 面接対策Q&A（テキスト版）を保存する",
+                data=download_text,
+                file_name=f"ルート航図_面接対策_{company_name_html}.txt",
+                mime="text/plain",
+                use_container_width=True
             )
 
 if __name__ == "__main__":
