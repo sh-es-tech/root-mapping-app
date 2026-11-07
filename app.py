@@ -45,72 +45,8 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# 📄 直接PDF生成ユーティリティ (エラー回避付き)
+# 📄 面接対策 Q&A 用 直接PDF生成 (ReportLab)
 # ==========================================
-def build_map_pdf(company_name: str, target_job: str, mermaid_code: str) -> Optional[bytes]:
-    """図解マップ（構造仕様）を直接PDFバイナリとして生成"""
-    try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-        from reportlab.lib.styles import ParagraphStyle
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-        from reportlab.lib import colors
-
-        pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
-        
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(
-            buffer,
-            pagesize=A4,
-            rightMargin=36,
-            leftMargin=36,
-            topMargin=36,
-            bottomMargin=36
-        )
-        
-        title_style = ParagraphStyle(
-            'DocTitle',
-            fontName='HeiseiKakuGo-W5',
-            fontSize=16,
-            leading=22,
-            textColor=colors.HexColor('#1976D2'),
-            spaceAfter=4
-        )
-        meta_style = ParagraphStyle(
-            'DocMeta',
-            fontName='HeiseiKakuGo-W5',
-            fontSize=9.5,
-            leading=14,
-            textColor=colors.HexColor('#555555'),
-            spaceAfter=14
-        )
-        code_style = ParagraphStyle(
-            'CodeStyle',
-            fontName='HeiseiKakuGo-W5',
-            fontSize=8.5,
-            leading=13,
-            textColor=colors.HexColor('#212121'),
-            spaceAfter=6
-        )
-
-        story = []
-        c_name = html.escape(company_name if company_name else "キャリア設計")
-        t_job = html.escape(target_job if target_job else "営業職・総合職")
-        
-        story.append(Paragraph("【Root Mapping】ルート航図（マップ構造書）", title_style))
-        story.append(Paragraph(f"志望企業・業界: {c_name}  |  希望職種: {t_job}", meta_style))
-        story.append(Spacer(1, 4))
-        
-        clean_code = html.escape(mermaid_code).replace('\n', '<br/>')
-        story.append(Paragraph(f"<b>■ Mermaid 構造定義コード:</b><br/><br/>{clean_code}", code_style))
-
-        doc.build(story)
-        buffer.seek(0)
-        return buffer.getvalue()
-    except Exception:
-        return None
-
 def build_qa_pdf(company_name: str, target_job: str, qa_results: list) -> Optional[bytes]:
     """面接対策Q&Aを直接PDFバイナリとして生成"""
     try:
@@ -612,19 +548,46 @@ def main():
         st.subheader("🗺️ ルート航図（Mermaid図解）")
         st.markdown("```mermaid\n" + mermaid_code + "\n```")
 
-        # 📄 マップ構造仕様の直接PDFデータ作成
-        map_pdf_bytes = build_map_pdf(saved_company, saved_job, mermaid_code)
+        # 🖼️ ビジュアル図解マップ専用のHTMLパッケージ作成（自動レンダリング＆印刷・PDFボタン埋め込み）
+        html_map_lines = [
+            "<!DOCTYPE html>",
+            "<html lang='ja'>",
+            "<head>",
+            "    <meta charset='utf-8'>",
+            "    <title>ルート航図マップ</title>",
+            "    <script src='https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js'></script>",
+            "    <script>mermaid.initialize({startOnLoad:true});</script>",
+            "    <style>",
+            "        body { font-family: sans-serif; padding: 30px; text-align: center; background-color: #ffffff; color: #333; }",
+            "        h1 { color: #1976D2; font-size: 24px; margin-bottom: 5px; }",
+            "        .sub { color: #666; font-size: 14px; margin-bottom: 25px; }",
+            "        .mermaid { display: inline-block; margin-top: 10px; max-width: 100%; }",
+            "        .btn-print { padding: 12px 28px; background-color: #1976D2; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 15px; cursor: pointer; margin-bottom: 25px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }",
+            "        .btn-print:hover { background-color: #1565C0; }",
+            "        @media print { .btn-print { display: none !important; } body { padding: 0; } @page { size: A4 landscape; margin: 10mm; } }",
+            "    </style>",
+            "</head>",
+            "<body>",
+            "    <button class='btn-print' onclick='window.print()'>📄 この図解マップをPDFで保存する</button>",
+            f"    <h1>ルート航図（Root Mapping）</h1>",
+            f"    <div class='sub'>志望企業・業界: {company_label} | 希望職種: {saved_job}</div>",
+            "    <div class='mermaid'>",
+            mermaid_code,
+            "    </div>",
+            "</body>",
+            "</html>"
+        ]
+        html_map_content = "\n".join(html_map_lines)
 
-        if map_pdf_bytes:
-            st.download_button(
-                label="📄 「出力された図（マップ構造書）」をPDFでダウンロード",
-                data=map_pdf_bytes,
-                file_name=f"ルート航図_マップ_{company_label}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-        else:
-            st.warning("💡 PDFダウンロード機能を利用するには、requirements.txt に `reportlab` を追加してください。")
+        # ⬇️ 【図解表示の直下に配置】ビジュアル図解PDF化用ボタン
+        st.download_button(
+            label="🗺️ 「出力された図（マップ画像PDF）」を保存・ダウンロード",
+            data=html_map_content,
+            file_name=f"ルート航図_マップ_{company_label}.html",
+            mime="text/html",
+            use_container_width=True
+        )
+        st.caption("💡 **使い方:** ダウンロードされたファイルを開くと図解が表示され、上のボタンから一発で綺麗なPDF画像として保存できます。")
 
         st.markdown("---")
 
@@ -655,6 +618,7 @@ def main():
         # 📄 面接対策Q&Aの直接PDFデータ作成
         qa_pdf_bytes = build_qa_pdf(saved_company, saved_job, qa_results)
 
+        # ⬇️ 【全8つのQ&A出力完了の直下に配置】面接対策PDF ＆ テキスト保存ボタン
         col_qa_1, col_qa_2 = st.columns(2)
         with col_qa_1:
             if qa_pdf_bytes:
