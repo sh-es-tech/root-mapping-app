@@ -162,7 +162,6 @@ def get_available_models(api_key: str) -> List[str]:
                 if "generateContent" in methods and not any(k in name for k in ["tts", "embedding", "bison", "imagen", "audio"]):
                     models.append(name)
             
-            # 【修正】賢く指示に忠実なモデルを最優先に変更
             priority_order = [
                 "gemini-2.0-flash",
                 "gemini-1.5-flash",
@@ -260,7 +259,6 @@ def generate_interview_qa(api_key: str, profile: StudentProfile, status_box) -> 
     st_goals_str = ', '.join(profile.career_vision.short_term_goals)
     ml_goals_str = ', '.join(profile.career_vision.mid_long_goals)
 
-    # 【修正】出力形式の指示をより強力に指定
     prompt_lines = [
         "あなたはプロのキャリアアドバイザーです。以下の学生のプロフィールをもとに、面接官がしそうな質問と、学生が答えるべき回答案、およびアドバイスを生成してください。",
         "必ず以下の8つのテーマ全てについて生成し、指定のJSON配列（[ { ... } ]）形式で出力してください。",
@@ -398,7 +396,8 @@ def main():
         st.image(logo_filename, width=500)
 
     st.title("Root Mapping（ルート航図）作成ツール")
-    st.caption("※「ルート航図」「Root Mapping」は登録商標（35類、41類、42類）出願中です。")
+    # ↓ 指定通りに修正した箇所です
+    st.caption("※「ルート航図」は登録商標（35類、41類、42類）出願中です。")
 
     st.markdown("---")
 
