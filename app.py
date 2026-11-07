@@ -43,47 +43,60 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ UI連動型：自動リトライ付き通信処理
+# ⚙️ 予備モデル自動切り替え付き通信処理
 # ==========================================
 def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) -> str:
     client = genai.Client(api_key=api_key)
-    model_name = "gemini-3.8-flash"
     
-    max_retries = 3   # 待ち時間を減らすため、最大3回で打ち切り
-    wait_time = 3     # 3秒待機からスタート
+    # 本命がダメだった時のための「予備モデル」リスト（上から順に試す）
+    models_to_try = ["gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    
+    max_retries = 3
 
-    for attempt in range(max_retries):
-        try:
-            if attempt > 0:
-                status_box.write(f"🔄 {task_name}: サーバー混雑のため再試行しています... ({attempt}/{max_retries-1}回目)")
-                
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt
-            )
-            
-            if response and response.text:
+    for model_name in models_to_try:
+        status_box.write(f"🤖 モデル [{model_name}] に接続しています...")
+        wait_time = 3  # モデルごとに待機時間をリセット
+        
+        for attempt in range(max_retries):
+            try:
                 if attempt > 0:
-                    status_box.write(f"✅ {task_name}: 通信に成功しました！")
-                return response.text.strip()
+                    status_box.write(f"🔄 {task_name}: [{model_name}] 混雑のため再試行中... ({attempt}/{max_retries-1}回目)")
+                    
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
                 
-        except Exception as e:
-            error_msg = str(e)
-            
-            # 503エラー (一時的な混雑) や 429エラー (レート制限) の場合
-            if "503" in error_msg or "UNAVAILABLE" in error_msg or "429" in error_msg:
-                if attempt < max_retries - 1:
-                    status_box.write(f"⏳ サーバー高負荷（503）を検知しました。{wait_time}秒待機してリトライします...")
-                    time.sleep(wait_time)
-                    wait_time += 2  # 3秒 → 5秒 と少しだけ待機を延ばす
-                    continue
+                if response and response.text:
+                    if attempt > 0 or model_name != models_to_try[0]:
+                        status_box.write(f"✅ {task_name}: [{model_name}] で通信に成功しました！")
+                    return response.text.strip()
+                    
+            except Exception as e:
+                error_msg = str(e)
+                
+                # 503エラー (一時的な混雑) や 429エラー (レート制限) の場合
+                if "503" in error_msg or "UNAVAILABLE" in error_msg or "429" in error_msg:
+                    if attempt < max_retries - 1:
+                        status_box.write(f"⏳ [{model_name}] 高負荷（503）。{wait_time}秒待機してリトライします...")
+                        time.sleep(wait_time)
+                        wait_time += 2
+                        continue
+                    else:
+                        status_box.write(f"⚠️ [{model_name}] は混雑が解消しません。別の予備モデルに切り替えます。")
+                        break # 現在のモデルを諦めて、次のモデルへ（for loop を抜ける）
+                        
+                # 404エラー (その環境でモデルが使えない) の場合
+                elif "404" in error_msg or "NOT_FOUND" in error_msg:
+                    status_box.write(f"⚠️ [{model_name}] は利用できないため、別の予備モデルに切り替えます。")
+                    break # 現在のモデルを諦めて、次のモデルへ
+                    
                 else:
-                    raise Exception(f"Googleサーバーの混雑が解消されませんでした。数分〜数十分おいてから再度お試しください。")
-            else:
-                # その他の致命的なエラー（APIキー間違いなど）は即終了
-                raise Exception(f"APIエラーが発生しました。\n詳細: {error_msg}")
+                    # その他の致命的なエラー（APIキー間違いなど）は即終了
+                    raise Exception(f"APIエラーが発生しました。\n詳細: {error_msg}")
 
-    raise Exception("不明なエラーで生成に失敗しました。")
+    # すべてのモデルが失敗した場合
+    raise Exception("すべてのAIモデルが混雑しているか、利用できませんでした。時間をおいて再度お試しください。")
 
 # ==========================================
 # 2. Gemini API 連携 (Mermaid図解 ＆ Q&A生成)
@@ -136,7 +149,6 @@ def generate_interview_qa(api_key: str, profile: StudentProfile, status_box) -> 
 
     text = generate_text_safe(api_key, prompt, "Q&Aの生成", status_box)
     
-    # 確実なJSON抽出
     start_idx = text.find('[')
     end_idx = text.rfind(']')
     
@@ -206,7 +218,6 @@ def generate_mermaid_by_ai(api_key: str, profile: StudentProfile, status_box) ->
 
     text = generate_text_safe(api_key, prompt, "図解の生成", status_box)
     
-    # MermaidのMarkdownブロックがついてしまった場合の除去
     if text.startswith("```mermaid"):
         text = text[10:]
     elif text.startswith("```"):
