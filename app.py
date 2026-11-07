@@ -217,18 +217,36 @@ def main():
         }
         </style>
     """, unsafe_allow_html=True)
-    
+
+    # 🔒 パスワード認証機能
+    with st.sidebar:
+        st.header("🔑 アクセス認証")
+        user_password = st.text_input("パスワードを入力してください", type="password")
+        
+        if user_password != "hizume_lab":
+            if user_password:
+                st.error("❌ パスワードが違います")
+            else:
+                st.info("💡 左側サイドバーにパスワードを入力してください")
+            st.warning("🔒 ご利用にはテスト用パスワード（`hizume_lab`）の入力が必要です。")
+            st.stop()
+        else:
+            st.success("✅ 認証完了")
+
+        st.markdown("---")
+        st.header("⚙️ API設定")
+        # Secretsにキー設定があれば読み込み、無ければ手動入力
+        default_api_key = st.secrets.get("GEMINI_API_KEY", "") if hasattr(st, "secrets") else ""
+        api_key_input = st.text_input("Gemini APIキー", value=default_api_key, type="password", placeholder="設定済みの場合は入力不要")
+        api_key = api_key_input if api_key_input else default_api_key
+        st.info("💡 AIが文脈を読み取って「あなただけのオリジナル図解」と「面接Q&A」を全自動で生成します！")
+
     if "generated" not in st.session_state:
         st.session_state.generated = False
         st.session_state.mermaid_code = ""
         st.session_state.qa_results = []
         st.session_state.target_company = ""
         st.session_state.target_job = ""
-
-    with st.sidebar:
-        st.header("⚙️ 設定")
-        api_key = st.text_input("Gemini APIキー (※必須)", type="password", placeholder="AIによる図解・Q&A生成に必要です")
-        st.info("💡 AIが文脈を読み取って「あなただけのオリジナル図解」と「面接Q&A」を全自動で生成します！")
 
     logo_filename = None
     possible_logos = ["logo.jepeg", "logo.jpeg", "logo.jpg", "logo.png", "logo.JEPEG", "logo.JPEG", "logo.JPG", "logo.PNG"]
@@ -284,7 +302,7 @@ def main():
     if submit_btn:
         clean_api_key = api_key.strip() if api_key else ""
         if not clean_api_key:
-            st.error("⚠️ 左側のサイドバーに「Gemini APIキー」を入力してください。")
+            st.error("⚠️ Gemini APIキーを入力するか、Secretsに登録してください。")
             return
 
         target_job = target_job_input.strip() if target_job_input.strip() else "営業職・総合職"
