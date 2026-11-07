@@ -1,11 +1,11 @@
 import os
 import json
 import time
-import io
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 # ==========================================
 # 1. データモデル定義
@@ -44,107 +44,9 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# 📄 PDF生成ユーティリティ (ReportLab)
-# ==========================================
-def generate_pdf_bytes(title: str, subtitle: str, content_blocks: List[Dict[str, str]]) -> Optional[bytes]:
-    """ReportLabを使用して日本語対応PDFバイナリを出力する"""
-    try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib import colors
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-
-        pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKaku-W5'))
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(
-            buffer,
-            pagesize=A4,
-            rightMargin=36,
-            leftMargin=36,
-            topMargin=36,
-            bottomMargin=36
-        )
-        
-        styles = getSampleStyleSheet()
-        
-        title_style = ParagraphStyle(
-            'DocTitle',
-            fontName='HeiseiKaku-W5',
-            fontSize=16,
-            leading=20,
-            textColor=colors.HexColor('#1976D2'),
-            spaceAfter=6
-        )
-        sub_style = ParagraphStyle(
-            'DocSub',
-            fontName='HeiseiKaku-W5',
-            fontSize=10,
-            leading=14,
-            textColor=colors.HexColor('#555555'),
-            spaceAfter=12
-        )
-        h2_style = ParagraphStyle(
-            'SectionH2',
-            fontName='HeiseiKaku-W5',
-            fontSize=12,
-            leading=16,
-            textColor=colors.HexColor('#0D47A1'),
-            spaceBefore=10,
-            spaceAfter=4
-        )
-        body_style = ParagraphStyle(
-            'BodyTextCustom',
-            fontName='HeiseiKaku-W5',
-            fontSize=9.5,
-            leading=14,
-            textColor=colors.HexColor('#212121'),
-            spaceAfter=4
-        )
-        advice_style = ParagraphStyle(
-            'AdviceCustom',
-            fontName='HeiseiKaku-W5',
-            fontSize=9,
-            leading=13,
-            textColor=colors.HexColor('#2E7D32'),
-            spaceAfter=8
-        )
-
-        story = []
-        story.append(Paragraph(title, title_style))
-        if subtitle:
-            story.append(Paragraph(subtitle, sub_style))
-        story.append(Spacer(1, 8))
-        
-        for block in content_blocks:
-            b_type = block.get("type")
-            text = block.get("text", "").replace("\n", "<br/>")
-            
-            if b_type == "heading":
-                story.append(Paragraph(text, h2_style))
-            elif b_type == "question":
-                story.append(Paragraph(f"<b>【面接官の質問】</b><br/>{text}", body_style))
-            elif b_type == "answer":
-                story.append(Paragraph(f"<b>【回答案】</b><br/>{text}", body_style))
-            elif b_type == "advice":
-                story.append(Paragraph(f"💡 <b>【アドバイス】</b><br/>{text}", advice_style))
-                story.append(Spacer(1, 4))
-            elif b_type == "text":
-                story.append(Paragraph(text, body_style))
-                
-        doc.build(story)
-        buffer.seek(0)
-        return buffer.getvalue()
-    except Exception as e:
-        st.warning(f"PDF作成時にエラーが発生しました (要 reportlab パッケージ): {e}")
-        return None
-
-# ==========================================
 # ⚙️ 爆速・自動最適化 API 通信処理
 # ==========================================
 def get_available_models(api_key: str) -> List[str]:
-    """利用可能モデルを取得し、TTS/Image等の不適合モデルを排除して成功実績モデルを最優先配置"""
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
         res = requests.get(url, timeout=5)
@@ -154,11 +56,9 @@ def get_available_models(api_key: str) -> List[str]:
             for m in data.get("models", []):
                 methods = m.get("supportedGenerationMethods", [])
                 name = m.get("name", "").replace("models/", "")
-                # generateContent対応かつ、音声・画像・埋め込み等テキスト生成非対応を除外
                 if "generateContent" in methods and not any(k in name for k in ["tts", "embedding", "bison", "imagen", "audio"]):
                     models.append(name)
             
-            # 高速かつ動作成功実績の高いモデルを最優先にする
             priority_order = [
                 "gemini-flash-lite-latest",
                 "gemini-1.5-flash",
@@ -188,15 +88,12 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
 
     for model_name in models_to_try:
         status_box.write(f"🤖 モデル [{model_name}] へ接続中...")
-        
         max_retries = 3
         wait_time = 2
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
         headers = {'Content-Type': 'application/json'}
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}]
-        }
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
         
         for attempt in range(max_retries):
             try:
@@ -555,7 +452,9 @@ def main():
             
         st.markdown("```mermaid\n" + mermaid_code + "\n```")
 
-        # HTMLマップファイルの作成（印刷ボタン付）
+        # ------------------------------------------
+        # ① ルート航図マップの保存・PDF出力エリア
+        # ------------------------------------------
         company_name_html = saved_company if saved_company else 'キャリア設計'
         html_lines = [
             "<!DOCTYPE html>",
@@ -569,12 +468,12 @@ def main():
             "        body { font-family: sans-serif; padding: 20px; text-align: center; background-color: #ffffff; }",
             "        h1 { color: #333; }",
             "        .mermaid { display: inline-block; margin-top: 20px; }",
-            "        .btn-print { margin-bottom: 20px; padding: 10px 20px; background-color: #1976D2; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }",
-            "        @media print { .btn-print { display: none; } }",
+            "        .btn-print { margin-bottom: 20px; padding: 10px 20px; background-color: #1976D2; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; }",
+            "        @media print { .btn-print { display: none !important; } }",
             "    </style>",
             "</head>",
             "<body>",
-            "    <button class='btn-print' onclick='window.print()'>📄 このページをPDFで保存 / 印刷</button>",
+            "    <button class='btn-print' onclick='window.print()'>📄 このルート航図をPDFで保存する</button>",
             f"    <h1>ルート航図マップ（{company_name_html}）</h1>",
             "    <div class='mermaid'>",
             mermaid_code,
@@ -592,31 +491,29 @@ def main():
                 file_name="ルート航図_マップ.html",
                 mime="text/html"
             )
-
-        # マップPDFデータの作成
-        map_pdf_blocks = [
-            {"type": "heading", "text": "■ ルート航図（Mermaid構造定義コード）"},
-            {"type": "text", "text": mermaid_code}
-        ]
-        map_pdf_bytes = generate_pdf_bytes(
-            title=f"【Root Mapping】ルート航図構造書（{company_name_html}）",
-            subtitle=f"志望職種: {saved_job}",
-            content_blocks=map_pdf_blocks
-        )
-        if map_pdf_bytes:
-            with col_map_2:
-                st.download_button(
-                    label="📄 ルート航図（PDF）をダウンロードする",
-                    data=map_pdf_bytes,
-                    file_name="ルート航図_マップ.pdf",
-                    mime="application/pdf"
-                )
+        with col_map_2:
+            # JavaScript連動のワンクリックPDFダイアログ起動ボタン
+            components.html(
+                """
+                <button onclick="window.parent.print()" style="
+                    width: 100%;
+                    padding: 0.5rem 1rem;
+                    background-color: #4CAF50;
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    font-weight: bold;
+                    cursor: pointer;
+                    font-size: 14px;
+                ">📄 画面全体をワンクリックPDF保存</button>
+                """,
+                height=45
+            )
 
         st.markdown("---")
         st.header("💡 AI面接対策 Q&A（8つの主要テーマ）")
         
         download_text = f"【Root Mapping キャリアシート】\n志望企業: {saved_company}\n希望職種: {saved_job}\n\n■ 面接対策Q&A\n"
-        qa_pdf_blocks = []
 
         if isinstance(qa_results, list) and len(qa_results) > 0:
             for i, qa in enumerate(qa_results):
@@ -632,43 +529,40 @@ def main():
                 st.markdown("---")
                     
                 download_text += f"\n--- {theme} ---\n質問: {question}\n回答: {answer}\nアドバイス: {advice}\n"
-                
-                qa_pdf_blocks.append({"type": "heading", "text": f"📌 {theme}"})
-                qa_pdf_blocks.append({"type": "question", "text": question})
-                qa_pdf_blocks.append({"type": "answer", "text": answer})
-                qa_pdf_blocks.append({"type": "advice", "text": advice})
         else:
             st.error("面接対策データの読み込みに失敗しました。リトライしてください。")
 
-        st.subheader("📄 結果の保存・PDF化")
+        # ------------------------------------------
+        # ② 面接対策の保存・PDF出力エリア
+        # ------------------------------------------
+        st.subheader("📄 結果の保存・PDF出力")
         
         col_qa_1, col_qa_2 = st.columns(2)
-        
-        # 面接対策 PDF バイトデータ作成
-        qa_pdf_bytes = generate_pdf_bytes(
-            title="【Root Mapping】面接対策 Q&A シート",
-            subtitle=f"志望企業: {saved_company} | 希望職種: {saved_job}",
-            content_blocks=qa_pdf_blocks
-        )
-        
-        if qa_pdf_bytes:
-            with col_qa_1:
-                st.download_button(
-                    label="📄 面接対策Q&A（PDF）をダウンロードする",
-                    data=qa_pdf_bytes,
-                    file_name="ルート航図_面接対策.pdf",
-                    mime="application/pdf"
-                )
-        
-        with col_qa_2:
+        with col_qa_1:
             st.download_button(
                 label="📥 面接対策Q&A（テキスト）を保存する",
                 data=download_text,
                 file_name="ルート航図_面接対策.txt",
                 mime="text/plain"
             )
-            
-        st.info("💡 **Web画面全体を直接PDF化したい場合:** ブラウザで `Ctrl + P` （Macは `Cmd + P`）を押し、送信先を「PDFに保存」に切り替えて保存することも可能です。")
+        with col_qa_2:
+            # 面接対策結果専用のワンクリックPDF保存ボタン
+            components.html(
+                """
+                <button onclick="window.parent.print()" style="
+                    width: 100%;
+                    padding: 0.5rem 1rem;
+                    background-color: #1976D2;
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    font-weight: bold;
+                    cursor: pointer;
+                    font-size: 14px;
+                ">📄 面接対策シートをワンクリックPDF保存</button>
+                """,
+                height=45
+            )
 
 if __name__ == "__main__":
     main()
