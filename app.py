@@ -1,6 +1,5 @@
 import os
 import json
-import re
 import time
 import streamlit as st
 from google import genai
@@ -44,27 +43,13 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ 完全自動：利用可能モデルの自動判定＆取得
+# ⚙️ シンプル版：直接APIを叩く処理（通信フリーズ防止）
 # ==========================================
-def get_available_models(client: genai.Client) -> List[str]:
-    try:
-        models = client.models.list()
-        valid_models = []
-        for m in models:
-            name = m.name.replace("models/", "")
-            if "flash" in name and "embedding" not in name and "imagen" not in name and "tts" not in name:
-                valid_models.append(name)
-        
-        valid_models.sort(reverse=True)
-        if valid_models:
-            return valid_models
-    except Exception:
-        pass
+def generate_text_safe(api_key: str, prompt: str) -> str:
+    client = genai.Client(api_key=api_key)
     
-    return ["gemini-2.5-flash", "gemini-2.0-flash"]
-
-def generate_text_with_auto_model(client: genai.Client, prompt: str) -> str:
-    candidate_models = get_available_models(client)
+    # 安定して使えるモデルを順番に試す（リスト取得通信によるフリーズを防止）
+    candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
     last_exception = None
 
     for model_name in candidate_models:
@@ -80,14 +65,12 @@ def generate_text_with_auto_model(client: genai.Client, prompt: str) -> str:
             time.sleep(1)
             continue
             
-    raise Exception(f"すべての自動試行モデルでの生成に失敗しました: {last_exception}")
+    raise Exception(f"APIエラー: {last_exception}")
 
 # ==========================================
 # 2. Gemini API 連携 (Mermaid図解 ＆ Q&A生成)
 # ==========================================
 def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[str, str]]:
-    client = genai.Client(api_key=api_key)
-    
     exp_text = "\n".join([f"- {e.category} ({e.period}): {e.title} / 得た強み: {', '.join(e.skills_acquired)}" for e in profile.experiences])
     es_text = "\n".join([f"- ES軸: {es.title} / 関連経験: {es.focus_experience}" for es in profile.es_points])
     hr_text = f"活用したい社内制度: {profile.hr_systems.education_system}" if profile.hr_systems.education_system else "活用したい社内制度: 一般的な制度（異動制度、研修制度、キャリア開発・配置換えなど）"
@@ -132,21 +115,16 @@ def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[st
     ]
     prompt = "\n".join(prompt_lines)
 
-    try:
-        text = generate_text_with_auto_model(client, prompt)
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        return json.loads(text.strip())
-    except Exception as e:
-        return [{"error": str(e)}]
+    text = generate_text_safe(api_key, prompt)
+    if text.startswith("```json"):
+        text = text[7:]
+    if text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return json.loads(text.strip())
 
 def generate_mermaid_by_ai(api_key: str, profile: StudentProfile) -> str:
-    client = genai.Client(api_key=api_key)
-    
     exp_text = "\n".join([f"- 経験{i+1}: {e.title} / 得た強み: {', '.join(e.skills_acquired)}" for i, e in enumerate(profile.experiences)])
     es_text = "\n".join([f"- {es.title} / 関連経験: {es.focus_experience}" for es in profile.es_points])
     hr_text = profile.hr_systems.education_system if profile.hr_systems.education_system else "一般的な社内制度（異動制度、研修制度、配置換え）"
@@ -201,19 +179,16 @@ def generate_mermaid_by_ai(api_key: str, profile: StudentProfile) -> str:
     ]
     prompt = "\n".join(prompt_lines)
 
-    try:
-        text = generate_text_with_auto_model(client, prompt)
-        if text.startswith("```mermaid"):
-            text = text[10:]
-        elif text.startswith("```"):
-            text = text[3:]
-            
-        if text.endswith("```"):
-            text = text[:-3]
-            
-        return text.strip()
-    except Exception as e:
-        return f"flowchart BT\nError[\"APIエラーが発生しました<br/>{str(e)}\"]"
+    text = generate_text_safe(api_key, prompt)
+    if text.startswith("```mermaid"):
+        text = text[10:]
+    elif text.startswith("```"):
+        text = text[3:]
+        
+    if text.endswith("```"):
+        text = text[:-3]
+        
+    return text.strip()
 
 # ==========================================
 # 3. Streamlit UI構築
@@ -221,7 +196,6 @@ def generate_mermaid_by_ai(api_key: str, profile: StudentProfile) -> str:
 def main():
     st.set_page_config(page_title="Root Mapping & AI Career Coach", layout="wide")
 
-    # トリプルクォート排除のCSS設定
     css_lines = [
         "<style>",
         "@media print {",
@@ -345,28 +319,34 @@ def main():
         if vision_ultimate: profile.career_vision.ultimate_vision = vision_ultimate
 
         st.markdown("---")
-        status_box = st.status("🚀 利用可能な最適なAIモデルを判定して自動生成中...（所要時間：約30〜45秒）", expanded=True)
+        status_box = st.status("🚀 処理を開始します...", expanded=True)
         
+        # --- ステップ1 実行 ---
+        status_box.write("⚙️ ステップ 1/2: ルート航図（Mermaid図解）を設計中...")
         try:
-            status_box.write("⚙️ ステップ 1/2: ルート航図（Mermaid図解）を設計中...（約15秒）")
             mermaid_res = generate_mermaid_by_ai(clean_api_key, profile)
-            
-            status_box.write("⚙️ ステップ 2/2: AI面接対策 8つのQ&Aを生成中...（約20秒）")
+        except Exception as e1:
+            status_box.update(label="❌ ステップ1でエラーが発生しました", state="error", expanded=True)
+            st.error(f"図解の生成に失敗しました。\n詳細: {e1}")
+            st.stop()
+
+        # --- ステップ2 実行 ---
+        status_box.write("⚙️ ステップ 2/2: AI面接対策 8つのQ&Aを生成中...")
+        try:
             qa_res = generate_interview_qa(clean_api_key, profile)
-            
-            status_box.update(label="✅ 生成完了！", state="complete", expanded=False)
+        except Exception as e2:
+            status_box.update(label="❌ ステップ2でエラーが発生しました", state="error", expanded=True)
+            st.error(f"Q&Aの生成に失敗しました。\n詳細: {e2}")
+            st.stop()
 
-            st.session_state.mermaid_code = mermaid_res
-            st.session_state.qa_results = qa_res
-            st.session_state.target_company = target_company.strip()
-            st.session_state.target_job = target_job
-            st.session_state.generated = True
+        # --- 完了 ---
+        status_box.update(label="✅ 生成完了！", state="complete", expanded=False)
 
-        except Exception as global_e:
-            status_box.update(label="❌ 通信エラーが発生しました", state="error", expanded=True)
-            st.error(f"接続に失敗しました: {global_e}")
-            st.warning("🔄 フォーム送信ボタンを再度押してリトライしてください。")
-            return
+        st.session_state.mermaid_code = mermaid_res
+        st.session_state.qa_results = qa_res
+        st.session_state.target_company = target_company.strip()
+        st.session_state.target_job = target_job
+        st.session_state.generated = True
 
     if st.session_state.generated:
         mermaid_code = st.session_state.mermaid_code
@@ -385,7 +365,6 @@ def main():
             
         st.markdown("```mermaid\n" + mermaid_code + "\n```")
 
-        # トリプルクォート排除のHTML生成
         company_name_html = saved_company if saved_company else 'キャリア設計'
         html_lines = [
             "<!DOCTYPE html>",
@@ -423,7 +402,7 @@ def main():
         
         download_text = f"【Root Mapping キャリアシート】\n志望企業: {saved_company}\n希望職種: {saved_job}\n\n■ 面接対策Q&A\n"
 
-        if qa_results and "error" not in qa_results[0]:
+        if isinstance(qa_results, list) and len(qa_results) > 0:
             for i, qa in enumerate(qa_results):
                 st.subheader(f"📌 {qa.get('theme', f'テーマ {i+1}')}")
                 st.markdown(f"**🤖 面接官:**\n「{qa.get('question', '')}」")
@@ -433,8 +412,7 @@ def main():
                     
                 download_text += f"\n--- {qa.get('theme', '')} ---\n質問: {qa.get('question', '')}\n回答: {qa.get('answer_script', '')}\nアドバイス: {qa.get('advice', '')}\n"
         else:
-            err_msg = qa_results[0].get("error", "不明なエラー") if qa_results else "生成エラー"
-            st.error(f"面接対策の生成中にエラーが発生しました。（エラー内容: {err_msg}）")
+            st.error("面接対策のフォーマットが不正です。リトライしてください。")
 
         st.subheader("📄 結果の保存・PDF化")
         st.info("💡 **PDFとして保存・印刷する場合:** ブラウザで **`Ctrl` + `P`** （Macは `Cmd` + `P`）を押してください。送信先を「PDFに保存」に切り替えることで綺麗なPDFになります。")
