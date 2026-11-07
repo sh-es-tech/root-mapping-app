@@ -94,23 +94,29 @@ def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[st
     st_goals_str = ', '.join(profile.career_vision.short_term_goals)
     ml_goals_str = ', '.join(profile.career_vision.mid_long_goals)
 
-    # 修正点：エラーが起きにくい安全な複数行文字列フォーマットを採用
-    prompt = f"""あなたはプロのキャリアアドバイザーです。以下の学生のプロフィールをもとに、面接官がしそうな質問と、学生が答えるべき回答案、およびアドバイスを生成してください。
-必ず以下の8つのテーマ全てについて生成し、指定のJSON形式で出力してください。Markdownのコードブロックで囲まないで、純粋なJSON配列のみを出力してください。
-
-【学生プロフィール】
-志望企業・業界: {profile.target_company}
-希望職種: {profile.target_job}
-経験・原体験:
-{exp_text}
-アピールポイント(ES軸):
-{es_text}
-短期目標(1〜2年目): {st_goals_str}
-中長期目標(5〜10年後): {ml_goals_str}
-入社後の制度活用: {hr_text}
-最終ビジョン: {profile.career_vision.ultimate_vision}
-
-【出力テーマ】
-1. 自己PR（強みと再現性）
-2. ガクチカ（課題解決力）
-3
+    # 修正点：エラーが起きないようカッコ()による標準的な文字列結合を使用
+    prompt = (
+        "あなたはプロのキャリアアドバイザーです。以下の学生のプロフィールをもとに、面接官がしそうな質問と、学生が答えるべき回答案、およびアドバイスを生成してください。\n"
+        "必ず以下の8つのテーマ全てについて生成し、指定のJSON形式で出力してください。Markdownのコードブロックで囲まないで、純粋なJSON配列のみを出力してください。\n\n"
+        "【学生プロフィール】\n"
+        f"志望企業・業界: {profile.target_company}\n"
+        f"希望職種: {profile.target_job}\n"
+        "経験・原体験:\n" + exp_text + "\n"
+        "アピールポイント(ES軸):\n" + es_text + "\n"
+        f"短期目標(1〜2年目): {st_goals_str}\n"
+        f"中長期目標(5〜10年後): {ml_goals_str}\n"
+        f"入社後の制度活用: {hr_text}\n"
+        f"最終ビジョン: {profile.career_vision.ultimate_vision}\n\n"
+        "【出力テーマ】\n"
+        "1. 自己PR（強みと再現性）\n"
+        "2. ガクチカ（課題解決力）\n"
+        "3. 挫折・困難の経験\n"
+        "4. 志望動機（マッチング度）\n"
+        "5. 入社後の短期目標（1〜2年目）\n"
+        "6. 中長期キャリア（5〜10年後）\n"
+        "7. 最終ビジョン\n"
+        "8. 逆質問・貢献意欲\n\n"
+        "【出力JSONフォーマット】\n"
+        "[\n"
+        "  {\n"
+        '    "theme": "1. 自己
