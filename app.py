@@ -43,24 +43,21 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ 超安定版：環境に合わせたモデル名を網羅して試す処理
+# ⚙️ 超安定版：API通信とモデル選択
 # ==========================================
 def generate_text_safe(api_key: str, prompt: str) -> str:
     client = genai.Client(api_key=api_key)
     
-    # 404エラー対策：環境によって要求される詳細なバージョン名を網羅
+    # 現在のGoogle APIで確実に稼働する最新・安定モデルのみをリストアップ
     candidate_models = [
         "gemini-2.5-flash",
         "gemini-2.0-flash",
-        "gemini-2.0-flash-exp",
         "gemini-1.5-flash",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash-002",
-        "gemini-1.5-flash-001",
-        "gemini-pro"  # 最終手段（最も古くからあり確実に動くモデル）
+        "gemini-1.5-pro",
+        "gemini-1.5-flash-8b"
     ]
     
-    last_exception = None
+    errors = []
 
     for model_name in candidate_models:
         try:
@@ -71,13 +68,14 @@ def generate_text_safe(api_key: str, prompt: str) -> str:
             if response and response.text:
                 return response.text.strip()
         except Exception as e:
-            last_exception = e
-            # エラーの場合は0.5秒待ってから次のモデル名を試す
+            # エラー内容を記録し、0.5秒待機して次のモデルへ
+            errors.append(f"[{model_name}]: {str(e)}")
             time.sleep(0.5)
             continue
             
-    # 全てのモデル名で失敗した場合のみエラーを出す
-    raise Exception(f"利用可能なモデルが見つかりませんでした。詳細: {last_exception}")
+    # 全モデルが失敗した場合は、全てのエラー履歴を出力して原因特定を容易にする
+    error_msg = " / ".join(errors)
+    raise Exception(f"利用可能なモデルが見つかりませんでした。\n詳細: {error_msg}")
 
 # ==========================================
 # 2. Gemini API 連携 (Mermaid図解 ＆ Q&A生成)
@@ -91,7 +89,8 @@ def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[st
 
     prompt_lines = [
         "あなたはプロのキャリアアドバイザーです。以下の学生のプロフィールをもとに、面接官がしそうな質問と、学生が答えるべき回答案、およびアドバイスを生成してください。",
-        "必ず以下の8つのテーマ全てについて生成し、指定のJSON形式で出力してください。Markdownのコードブロックで囲まないで、純粋なJSON配列のみを出力してください。",
+        "必ず以下の8つのテーマ全てについて生成し、指定のJSON配列（[ { ... } ]）形式で出力してください。",
+        "※AIの挨拶や補足説明は一切不要です。JSONデータのみを出力してください。",
         "",
         "【学生プロフィール】",
         f"志望企業・業界: {profile.target_company}",
@@ -128,16 +127,22 @@ def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[st
     prompt = "\n".join(prompt_lines)
 
     text = generate_text_safe(api_key, prompt)
-    if text.startswith("```json"):
-        text = text[7:]
-    if text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    return json.loads(text.strip())
+    
+    # 確実なJSON抽出（AIが前後に余計な文章を入れても '[' から ']' までを強制的に切り出す）
+    start_idx = text.find('[')
+    end_idx = text.rfind(']')
+    
+    if start_idx != -1 and end_idx != -1:
+        json_str = text[start_idx:end_idx+1]
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError as e:
+            raise Exception(f"JSONの解析に失敗しました。出力形式が乱れています。\n詳細: {e}\n抽出テキスト: {json_str}")
+    else:
+        raise Exception(f"AIの回答からJSON配列が見つかりませんでした。\nAIの生の出力:\n{text}")
 
 def generate_mermaid_by_ai(api_key: str, profile: StudentProfile) -> str:
-    exp_text = "\n".join([f"- 経験{i+1}: {e.title} / 得た強み: {', '.join(e.skills_acquired)}" for i, e in enumerate(profile.experiences)])
+    exp_text = "\n".join([f"- {e.title} / 得た強み: {', '.join(e.skills_acquired)}" for e in profile.experiences])
     es_text = "\n".join([f"- {es.title} / 関連経験: {es.focus_experience}" for es in profile.es_points])
     hr_text = profile.hr_systems.education_system if profile.hr_systems.education_system else "一般的な社内制度（異動制度、研修制度、配置換え）"
     st_goals = ', '.join(profile.career_vision.short_term_goals)
@@ -184,14 +189,16 @@ def generate_mermaid_by_ai(api_key: str, profile: StudentProfile) -> str:
         "",
         "4. 記述構文の注意",
         " - ノードのIDは半角英数字のみ（例: Exp1, Goal2）。",
-        " - ノードのラベルはダブルクォーテーションで囲む。",
+        " - ノードのラベルはダブルクォーテーションで囲むこと。シングルクォーテーションは使用不可。",
         " - 改行は `<br/>` を使用。",
         "",
-        "Mermaidのコード（純粋なテキスト）のみを出力してください。Markdownのコードブロックは含めないでください。"
+        "Mermaidのコード（純粋なテキスト）のみを出力してください。Markdownのコードブロック(```mermaid)は含めないでください。"
     ]
     prompt = "\n".join(prompt_lines)
 
     text = generate_text_safe(api_key, prompt)
+    
+    # MermaidのMarkdownブロックがついてしまった場合の除去
     if text.startswith("```mermaid"):
         text = text[10:]
     elif text.startswith("```"):
@@ -360,6 +367,9 @@ def main():
         st.session_state.target_job = target_job
         st.session_state.generated = True
 
+    # ==========================================
+    # 4. 生成結果の表示エリア（図解 ＆ Q&A）
+    # ==========================================
     if st.session_state.generated:
         mermaid_code = st.session_state.mermaid_code
         qa_results = st.session_state.qa_results
@@ -370,7 +380,7 @@ def main():
         qa_file_name = "ルート航図_面接対策.txt"
 
         st.success("🎉 あなた専用のオリジナル・ルート航図が完成しました！")
-        st.info("💡 **アドバイス:** 出力されたルート航図（Root Mapping）を頭に入れて、想定外の質問にも根拠を提示して答えましょう！")
+        st.info("💡 **アドバイス:** 出力されたルート航図（Root Mapping）を頭に入れて、想定外の質問にも一貫性をもって答えましょう！")
         
         if logo_filename:
             st.image(logo_filename, width=350)
@@ -414,17 +424,23 @@ def main():
         
         download_text = f"【Root Mapping キャリアシート】\n志望企業: {saved_company}\n希望職種: {saved_job}\n\n■ 面接対策Q&A\n"
 
+        # 確実に出力するための精査ロジック
         if isinstance(qa_results, list) and len(qa_results) > 0:
             for i, qa in enumerate(qa_results):
-                st.subheader(f"📌 {qa.get('theme', f'テーマ {i+1}')}")
-                st.markdown(f"**🤖 面接官:**\n「{qa.get('question', '')}」")
-                st.markdown(f"**🗣️ 回答案:**\n{qa.get('answer_script', '')}")
-                st.info(f"**💡 アドバイス:**\n{qa.get('advice', '')}")
+                theme = qa.get('theme', f'テーマ {i+1}')
+                question = qa.get('question', '質問が生成されませんでした。')
+                answer = qa.get('answer_script', '回答案が生成されませんでした。')
+                advice = qa.get('advice', 'アドバイスが生成されませんでした。')
+
+                st.subheader(f"📌 {theme}")
+                st.markdown(f"**🤖 面接官:**\n「{question}」")
+                st.markdown(f"**🗣️ 回答案:**\n{answer}")
+                st.info(f"**💡 アドバイス:**\n{advice}")
                 st.markdown("---")
                     
-                download_text += f"\n--- {qa.get('theme', '')} ---\n質問: {qa.get('question', '')}\n回答: {qa.get('answer_script', '')}\nアドバイス: {qa.get('advice', '')}\n"
+                download_text += f"\n--- {theme} ---\n質問: {question}\n回答: {answer}\nアドバイス: {advice}\n"
         else:
-            st.error("面接対策のフォーマットが不正です。リトライしてください。")
+            st.error("面接対策データの読み込みに失敗しました。リトライしてください。")
 
         st.subheader("📄 結果の保存・PDF化")
         st.info("💡 **PDFとして保存・印刷する場合:** ブラウザで **`Ctrl` + `P`** （Macは `Cmd` + `P`）を押してください。送信先を「PDFに保存」に切り替えることで綺麗なPDFになります。")
