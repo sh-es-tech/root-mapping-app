@@ -6,7 +6,7 @@ import html
 import requests
 import streamlit as st
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 # ==========================================
 # 1. データモデル定義
@@ -45,163 +45,169 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# 📄 直接PDF生成ユーティリティ (ReportLab使用)
+# 📄 直接PDF生成ユーティリティ (エラー回避付き)
 # ==========================================
-def build_map_pdf(company_name: str, target_job: str, mermaid_code: str) -> bytes:
+def build_map_pdf(company_name: str, target_job: str, mermaid_code: str) -> Optional[bytes]:
     """図解マップ（構造仕様）を直接PDFバイナリとして生成"""
-    from reportlab.lib.pagesizes import A4
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-    from reportlab.lib.styles import ParagraphStyle
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-    from reportlab.lib import colors
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+        from reportlab.lib import colors
 
-    pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
-    
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=36,
-        leftMargin=36,
-        topMargin=36,
-        bottomMargin=36
-    )
-    
-    title_style = ParagraphStyle(
-        'DocTitle',
-        fontName='HeiseiKakuGo-W5',
-        fontSize=16,
-        leading=22,
-        textColor=colors.HexColor('#1976D2'),
-        spaceAfter=4
-    )
-    meta_style = ParagraphStyle(
-        'DocMeta',
-        fontName='HeiseiKakuGo-W5',
-        fontSize=9.5,
-        leading=14,
-        textColor=colors.HexColor('#555555'),
-        spaceAfter=14
-    )
-    code_style = ParagraphStyle(
-        'CodeStyle',
-        fontName='HeiseiKakuGo-W5',
-        fontSize=8.5,
-        leading=13,
-        textColor=colors.HexColor('#212121'),
-        spaceAfter=6
-    )
+        pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
+        
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=36,
+            leftMargin=36,
+            topMargin=36,
+            bottomMargin=36
+        )
+        
+        title_style = ParagraphStyle(
+            'DocTitle',
+            fontName='HeiseiKakuGo-W5',
+            fontSize=16,
+            leading=22,
+            textColor=colors.HexColor('#1976D2'),
+            spaceAfter=4
+        )
+        meta_style = ParagraphStyle(
+            'DocMeta',
+            fontName='HeiseiKakuGo-W5',
+            fontSize=9.5,
+            leading=14,
+            textColor=colors.HexColor('#555555'),
+            spaceAfter=14
+        )
+        code_style = ParagraphStyle(
+            'CodeStyle',
+            fontName='HeiseiKakuGo-W5',
+            fontSize=8.5,
+            leading=13,
+            textColor=colors.HexColor('#212121'),
+            spaceAfter=6
+        )
 
-    story = []
-    c_name = html.escape(company_name if company_name else "キャリア設計")
-    t_job = html.escape(target_job if target_job else "営業職・総合職")
-    
-    story.append(Paragraph("【Root Mapping】ルート航図（マップ構造書）", title_style))
-    story.append(Paragraph(f"志望企業・業界: {c_name}  |  希望職種: {t_job}", meta_style))
-    story.append(Spacer(1, 4))
-    
-    clean_code = html.escape(mermaid_code).replace('\n', '<br/>')
-    story.append(Paragraph(f"<b>■ Mermaid 構造定義コード:</b><br/><br/>{clean_code}", code_style))
+        story = []
+        c_name = html.escape(company_name if company_name else "キャリア設計")
+        t_job = html.escape(target_job if target_job else "営業職・総合職")
+        
+        story.append(Paragraph("【Root Mapping】ルート航図（マップ構造書）", title_style))
+        story.append(Paragraph(f"志望企業・業界: {c_name}  |  希望職種: {t_job}", meta_style))
+        story.append(Spacer(1, 4))
+        
+        clean_code = html.escape(mermaid_code).replace('\n', '<br/>')
+        story.append(Paragraph(f"<b>■ Mermaid 構造定義コード:</b><br/><br/>{clean_code}", code_style))
 
-    doc.build(story)
-    buffer.seek(0)
-    return buffer.getvalue()
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+    except Exception:
+        return None
 
-def build_qa_pdf(company_name: str, target_job: str, qa_results: list) -> bytes:
+def build_qa_pdf(company_name: str, target_job: str, qa_results: list) -> Optional[bytes]:
     """面接対策Q&Aを直接PDFバイナリとして生成"""
-    from reportlab.lib.pagesizes import A4
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-    from reportlab.lib.styles import ParagraphStyle
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-    from reportlab.lib import colors
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+        from reportlab.lib import colors
 
-    pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
-    
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=36,
-        leftMargin=36,
-        topMargin=36,
-        bottomMargin=36
-    )
-    
-    title_style = ParagraphStyle(
-        'DocTitle',
-        fontName='HeiseiKakuGo-W5',
-        fontSize=16,
-        leading=22,
-        textColor=colors.HexColor('#0D47A1'),
-        spaceAfter=4
-    )
-    meta_style = ParagraphStyle(
-        'DocMeta',
-        fontName='HeiseiKakuGo-W5',
-        fontSize=9.5,
-        leading=14,
-        textColor=colors.HexColor('#555555'),
-        spaceAfter=14
-    )
-    theme_style = ParagraphStyle(
-        'ThemeH2',
-        fontName='HeiseiKakuGo-W5',
-        fontSize=11.5,
-        leading=16,
-        textColor=colors.HexColor('#1565C0'),
-        spaceBefore=8,
-        spaceAfter=4
-    )
-    q_style = ParagraphStyle(
-        'QStyle',
-        fontName='HeiseiKakuGo-W5',
-        fontSize=9.5,
-        leading=14,
-        textColor=colors.HexColor('#0D47A1'),
-        spaceAfter=3
-    )
-    a_style = ParagraphStyle(
-        'AStyle',
-        fontName='HeiseiKakuGo-W5',
-        fontSize=9,
-        leading=13.5,
-        textColor=colors.HexColor('#212121'),
-        spaceAfter=4
-    )
-    advice_style = ParagraphStyle(
-        'AdviceStyle',
-        fontName='HeiseiKakuGo-W5',
-        fontSize=8.5,
-        leading=12.5,
-        textColor=colors.HexColor('#1B5E20'),
-        spaceAfter=10
-    )
+        pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
+        
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=36,
+            leftMargin=36,
+            topMargin=36,
+            bottomMargin=36
+        )
+        
+        title_style = ParagraphStyle(
+            'DocTitle',
+            fontName='HeiseiKakuGo-W5',
+            fontSize=16,
+            leading=22,
+            textColor=colors.HexColor('#0D47A1'),
+            spaceAfter=4
+        )
+        meta_style = ParagraphStyle(
+            'DocMeta',
+            fontName='HeiseiKakuGo-W5',
+            fontSize=9.5,
+            leading=14,
+            textColor=colors.HexColor('#555555'),
+            spaceAfter=14
+        )
+        theme_style = ParagraphStyle(
+            'ThemeH2',
+            fontName='HeiseiKakuGo-W5',
+            fontSize=11.5,
+            leading=16,
+            textColor=colors.HexColor('#1565C0'),
+            spaceBefore=8,
+            spaceAfter=4
+        )
+        q_style = ParagraphStyle(
+            'QStyle',
+            fontName='HeiseiKakuGo-W5',
+            fontSize=9.5,
+            leading=14,
+            textColor=colors.HexColor('#0D47A1'),
+            spaceAfter=3
+        )
+        a_style = ParagraphStyle(
+            'AStyle',
+            fontName='HeiseiKakuGo-W5',
+            fontSize=9,
+            leading=13.5,
+            textColor=colors.HexColor('#212121'),
+            spaceAfter=4
+        )
+        advice_style = ParagraphStyle(
+            'AdviceStyle',
+            fontName='HeiseiKakuGo-W5',
+            fontSize=8.5,
+            leading=12.5,
+            textColor=colors.HexColor('#1B5E20'),
+            spaceAfter=10
+        )
 
-    story = []
-    c_name = html.escape(company_name if company_name else "キャリア設計")
-    t_job = html.escape(target_job if target_job else "営業職・総合職")
-    
-    story.append(Paragraph("【Root Mapping】AI面接対策 Q&Aシート", title_style))
-    story.append(Paragraph(f"志望企業・業界: {c_name}  |  希望職種: {t_job}", meta_style))
-    story.append(Spacer(1, 4))
-
-    for qa in qa_results:
-        theme = html.escape(qa.get('theme', ''))
-        question = html.escape(qa.get('question', ''))
-        answer = html.escape(qa.get('answer_script', '')).replace('\n', '<br/>')
-        advice = html.escape(qa.get('advice', '')).replace('\n', '<br/>')
-
-        story.append(Paragraph(f"📌 {theme}", theme_style))
-        story.append(Paragraph(f"<b>🤖 質問:</b> 「{question}」", q_style))
-        story.append(Paragraph(f"<b>🗣️ 回答案:</b><br/>{answer}", a_style))
-        story.append(Paragraph(f"<b>💡 アドバイス:</b><br/>{advice}", advice_style))
+        story = []
+        c_name = html.escape(company_name if company_name else "キャリア設計")
+        t_job = html.escape(target_job if target_job else "営業職・総合職")
+        
+        story.append(Paragraph("【Root Mapping】AI面接対策 Q&Aシート", title_style))
+        story.append(Paragraph(f"志望企業・業界: {c_name}  |  希望職種: {t_job}", meta_style))
         story.append(Spacer(1, 4))
 
-    doc.build(story)
-    buffer.seek(0)
-    return buffer.getvalue()
+        for qa in qa_results:
+            theme = html.escape(qa.get('theme', ''))
+            question = html.escape(qa.get('question', ''))
+            answer = html.escape(qa.get('answer_script', '')).replace('\n', '<br/>')
+            advice = html.escape(qa.get('advice', '')).replace('\n', '<br/>')
+
+            story.append(Paragraph(f"📌 {theme}", theme_style))
+            story.append(Paragraph(f"<b>🤖 質問:</b> 「{question}」", q_style))
+            story.append(Paragraph(f"<b>🗣️ 回答案:</b><br/>{answer}", a_style))
+            story.append(Paragraph(f"<b>💡 アドバイス:</b><br/>{advice}", advice_style))
+            story.append(Spacer(1, 4))
+
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+    except Exception:
+        return None
 
 # ==========================================
 # ⚙️ 爆速・自動最適化 API 通信処理
@@ -609,14 +615,16 @@ def main():
         # 📄 マップ構造仕様の直接PDFデータ作成
         map_pdf_bytes = build_map_pdf(saved_company, saved_job, mermaid_code)
 
-        # ⬇️ 【図解表示の直下に配置】直接PDFダウンロードボタン
-        st.download_button(
-            label="🗺️ 「出力された図（マップ構造書）」をPDFでダウンロード",
-            data=map_pdf_bytes,
-            file_name=f"ルート航図_マップ_{company_label}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
+        if map_pdf_bytes:
+            st.download_button(
+                label="📄 「出力された図（マップ構造書）」をPDFでダウンロード",
+                data=map_pdf_bytes,
+                file_name=f"ルート航図_マップ_{company_label}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+        else:
+            st.warning("💡 PDFダウンロード機能を利用するには、requirements.txt に `reportlab` を追加してください。")
 
         st.markdown("---")
 
@@ -647,16 +655,18 @@ def main():
         # 📄 面接対策Q&Aの直接PDFデータ作成
         qa_pdf_bytes = build_qa_pdf(saved_company, saved_job, qa_results)
 
-        # ⬇️ 【全8つのQ&A出力完了の直下に配置】直接PDF ＆ テキスト保存ボタン
         col_qa_1, col_qa_2 = st.columns(2)
         with col_qa_1:
-            st.download_button(
-                label="📄 「面接対策Q&A」をPDFでダウンロード",
-                data=qa_pdf_bytes,
-                file_name=f"ルート航図_面接対策_{company_label}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
+            if qa_pdf_bytes:
+                st.download_button(
+                    label="📄 「面接対策Q&A」をPDFでダウンロード",
+                    data=qa_pdf_bytes,
+                    file_name=f"ルート航図_面接対策_{company_label}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            else:
+                st.warning("💡 PDF保存を利用するには requirements.txt に `reportlab` を記載してください。")
         with col_qa_2:
             st.download_button(
                 label="📥 面接対策Q&A（テキスト版）を保存する",
