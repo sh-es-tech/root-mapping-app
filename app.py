@@ -43,21 +43,24 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ 指定最新モデル対応：Direct REST API 通信処理
+# ⚙️ 混雑耐性強化版：Direct REST API 通信処理
 # ==========================================
 def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) -> str:
-    # APIのエラーメッセージで指示された最新モデルを優先順位順に設定
+    # 無料枠で確実に利用可能なFlashモデルを最優先
     models_to_try = [
         "gemini-3.8-flash",
+        "gemini-3.8-flash-lite",
         "gemini-3.1-pro-preview"
     ]
     
-    max_retries = 3
     last_error = ""
 
     for model_name in models_to_try:
-        status_box.write(f"🤖 最新モデル [{model_name}] へ通信中...")
-        wait_time = 2
+        status_box.write(f"🤖 モデル [{model_name}] へ通信中...")
+        
+        # Flashモデルの場合は混雑（503）を粘り強く待つ設定
+        max_retries = 5 if "flash" in model_name else 2
+        wait_time = 3
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
         headers = {'Content-Type': 'application/json'}
@@ -68,7 +71,7 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    status_box.write(f"🔄 {task_name}: [{model_name}] 混雑のため再試行中... ({attempt}/{max_retries-1})")
+                    status_box.write(f"🔄 {task_name}: [{model_name}] 混雑のため再試行中... ({attempt}/{max_retries-1}回目, {wait_time}秒待機)")
                     
                 response = requests.post(url, headers=headers, json=payload, timeout=40)
                 
@@ -87,14 +90,17 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
                     error_msg = response.text
                     last_error = f"HTTP {response.status_code}: {error_msg}"
                     
-                    if response.status_code in [503, 429]:
+                    if response.status_code == 503:
                         if attempt < max_retries - 1:
                             time.sleep(wait_time)
-                            wait_time *= 2  # 待機時間を段階的に延長
+                            wait_time *= 2  # 指数バックオフ (3s -> 6s -> 12s -> 24s)
                             continue
                         else:
-                            status_box.write(f"⚠️ [{model_name}] 混雑中 ({response.status_code})。次の予備モデルを試します。")
+                            status_box.write(f"⚠️ [{model_name}] 混雑が続いています。予備モデルへ移行します。")
                             break
+                    elif response.status_code == 429:
+                        status_box.write(f"⚠️ [{model_name}] 無料枠の利用制限（クオータ超過）を検知しました。")
+                        break
                     elif response.status_code in [404, 403, 400]:
                         status_box.write(f"⚠️ [{model_name}] HTTP {response.status_code} - {error_msg}")
                         break
