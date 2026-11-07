@@ -43,21 +43,21 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ Direct REST API 通信処理（エラー詳細を出力）
+# ⚙️ 最新API対応：Direct REST API 通信処理
 # ==========================================
 def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) -> str:
+    # 現在公式に提供されている最新モデル名のみを指定
     models_to_try = [
-        "gemini-1.5-flash",
-        "gemini-2.0-flash-exp",
-        "gemini-1.5-pro",
-        "gemini-pro"
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash"
     ]
     
-    max_retries = 2
+    max_retries = 3
     last_error = ""
 
     for model_name in models_to_try:
-        status_box.write(f"🤖 モデル [{model_name}] へ直接通信を試みています...")
+        status_box.write(f"🤖 最新モデル [{model_name}] へ通信中...")
         wait_time = 2
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
@@ -69,7 +69,7 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    status_box.write(f"🔄 {task_name}: [{model_name}] 混雑再試行... ({attempt}/{max_retries-1})")
+                    status_box.write(f"🔄 {task_name}: [{model_name}] 混雑のため再試行中... ({attempt}/{max_retries-1})")
                     
                 response = requests.post(url, headers=headers, json=payload, timeout=40)
                 
@@ -80,34 +80,32 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
                         status_box.write(f"✅ {task_name}: [{model_name}] で生成成功！")
                         return text.strip()
                     except (KeyError, IndexError):
-                        last_error = "レスポンスの形式が想定外、またはAIの安全フィルターでブロックされました。"
-                        status_box.write(f"⚠️ [{model_name}] 出力がブロックされました。次を試します。")
+                        last_error = "レスポンスの解析に失敗しました。"
+                        status_box.write(f"⚠️ [{model_name}] レスポンス形式エラー。")
                         break
                         
                 else:
                     error_msg = response.text
                     last_error = f"HTTP {response.status_code}: {error_msg}"
                     
-                    # 混雑（503, 429）の場合
                     if response.status_code in [503, 429]:
                         if attempt < max_retries - 1:
                             time.sleep(wait_time)
                             wait_time += 2
                             continue
                         else:
-                            status_box.write(f"⚠️ [{model_name}] 混雑エラー: HTTP {response.status_code} - {error_msg}")
+                            status_box.write(f"⚠️ [{model_name}] 混雑中 ({response.status_code})。次のモデルを試します。")
                             break
-                    # クライアントエラー（404, 403, 400）の場合に隠さずエラー全文を表示する
                     elif response.status_code in [404, 403, 400]:
-                        status_box.write(f"⚠️ [{model_name}] エラー詳細: HTTP {response.status_code} - {error_msg}")
+                        status_box.write(f"⚠️ [{model_name}] HTTP {response.status_code} - {error_msg}")
                         break
                     else:
-                        status_box.write(f"⚠️ [{model_name}] 通信エラー: HTTP {response.status_code} - {error_msg}")
+                        status_box.write(f"⚠️ [{model_name}] 通信エラー ({response.status_code})。")
                         break
                         
             except requests.exceptions.RequestException as e:
                 last_error = f"ネットワークエラー: {str(e)}"
-                status_box.write(f"⚠️ [{model_name}] 接続失敗 ({str(e)})。次を試します。")
+                status_box.write(f"⚠️ [{model_name}] 接続失敗。次を試します。")
                 break
 
     raise Exception(f"すべてのAIモデルで通信に失敗しました。\n最後のエラー詳細: {last_error}")
