@@ -221,8 +221,230 @@ def generate_mermaid_by_ai(api_key: str, profile: StudentProfile) -> str:
 def main():
     st.set_page_config(page_title="Root Mapping & AI Career Coach", layout="wide")
 
-    st.markdown("""
-        <style>
-        @media print {
-            [data-testid="stSidebar"], form, .stButton, .stDownloadButton, header, footer { display: none !important; }
-            @page { size: A4
+    # トリプルクォート排除のCSS設定
+    css_lines = [
+        "<style>",
+        "@media print {",
+        "    [data-testid='stSidebar'], form, .stButton, .stDownloadButton, header, footer { display: none !important; }",
+        "    @page { size: A4 landscape; margin: 10mm; }",
+        "    .main .block-container { max-width: 100% !important; padding: 0 !important; }",
+        "}",
+        "</style>"
+    ]
+    st.markdown("\n".join(css_lines), unsafe_allow_html=True)
+
+    logo_filename = None
+    possible_logos = ["logo.jepeg", "logo.jpeg", "logo.jpg", "logo.png", "logo.JEPEG", "logo.JPEG", "logo.JPG", "logo.PNG"]
+    for fn in possible_logos:
+        if os.path.exists(fn):
+            logo_filename = fn
+            break
+
+    if logo_filename:
+        st.image(logo_filename, width=500)
+
+    st.title("Root Mapping（ルート航図）作成ツール")
+    st.caption("※「ルート航図」「Root Mapping」は登録商標（35類、41類、42類）出願中です。")
+
+    st.markdown("---")
+
+    st.subheader("🔑 アクセス認証")
+    user_password = st.text_input("パスワードを入力してください", type="password", key="main_pass")
+
+    if user_password != "hizume_lab":
+        if user_password:
+            st.error("❌ パスワードが違います")
+        else:
+            st.info("💡 ご利用にはテスト用パスワード（`hizume_lab`）の入力が必要です。")
+        st.stop()
+    else:
+        st.success("✅ 認証完了（ご利用いただけます）")
+
+    st.markdown("---")
+
+    with st.sidebar:
+        st.header("⚙️ API設定")
+        default_api_key = st.secrets.get("GEMINI_API_KEY", "") if hasattr(st, "secrets") else ""
+        api_key_input = st.text_input("Gemini APIキー", value=default_api_key, type="password", placeholder="設定済みの場合は入力不要")
+        api_key = api_key_input if api_key_input else default_api_key
+        st.info("💡 AIが文脈を読み取って「あなただけのオリジナル図解」と「面接Q&A」を全自動で生成します！")
+
+    if "generated" not in st.session_state:
+        st.session_state.generated = False
+        st.session_state.mermaid_code = ""
+        st.session_state.qa_results = []
+        st.session_state.target_company = ""
+        st.session_state.target_job = ""
+
+    st.header("1. 基本情報・プロファイル入力")
+    with st.form("profile_form"):
+        target_company = st.text_input("志望企業名 / 志望業界", placeholder="例：株式会社イノベーション / IT・通信業界")
+        target_job_input = st.text_input(
+            "希望職種（※未入力の場合は「営業職・総合職」を前提として作成します）", 
+            placeholder="例：システムエンジニア（SE）、企画営業職など"
+        )
+        
+        st.subheader("2. 過去の経験（原体験）")
+        exp_inputs = []
+        for i in range(1, 6):
+            with st.expander(f"経験 {i} " + ("（※入力推奨）" if i <= 3 else "（※任意）"), expanded=(i<=2)):
+                t = st.text_input(f"経験{i}: タイトル", placeholder="例：個別指導塾でのアルバイト（リーダー）", key=f"exp_title_{i}")
+                p = st.text_input(f"経験{i}: 期間", placeholder="例：大学1年から現在", key=f"exp_period_{i}")
+                s = st.text_input(f"経験{i}: 身についた強み（カンマ区切り）", placeholder="例：傾聴力, 課題解決力", key=f"exp_skills_{i}")
+                exp_inputs.append((t, p, s))
+        
+        st.subheader("3. ESのメインテーマ（ガクチカ・自己PR）")
+        st.markdown("**【ガクチカ（学生時代に最も打ち込んだこと）】**")
+        gaku_title = st.text_input("ガクチカのアピールポイント", placeholder="例：チームの課題を分析し、退会率を半減させた経験")
+        gaku_focus = st.text_input("ベースとなる経験", placeholder="例：個別指導塾でのアルバイト")
+        
+        st.markdown("**【自己PR（あなたの最大の強み）】**")
+        pr_title = st.text_input("自己PRのアピールポイント", placeholder="例：目標達成に向けた粘り強さと行動力")
+        pr_focus = st.text_input("ベースとなる経験", placeholder="例：フットサルサークルでの合宿企画")
+        
+        st.subheader("4. 入社後のイメージ & 5. 人生全体のゴール")
+        st_goal = st.text_input("入社1〜2年目の目標", placeholder="例：未経験の業務でも自律的に学び業務フローを習得する")
+        hr_system_input = st.text_input(
+            "活用したい社内制度（※未入力の場合は一般制度を前提とします）", 
+            placeholder="例：若手向けの海外研修制度、ジョブローテーション制度など"
+        )
+        ml_goal = st.text_input("5〜10年後の目標", placeholder="例：現場で実績を積み、将来はリーダーに挑戦したい")
+        vision_ultimate = st.text_input("最終ビジョン", placeholder="例：クライアントの成長を支え、週末はキャンプを楽しむ社会人")
+        
+        submit_btn = st.form_submit_button("AIにルート航図と面接対策を作らせる！")
+
+    if submit_btn:
+        clean_api_key = api_key.strip() if api_key else ""
+        if not clean_api_key:
+            st.error("⚠️ Gemini APIキーを入力するか、Secretsに登録してください。")
+            return
+
+        target_job = target_job_input.strip() if target_job_input.strip() else "営業職・総合職"
+
+        if not hr_system_input.strip():
+            st.warning("💡 **会社理解のアドバイス:** 「活用したい社内制度」が未入力のため、今回は一般的な「異動制度・研修制度・配置換え」を前提に組み立てています。")
+
+        profile = StudentProfile(
+            target_company=target_company, 
+            target_job=target_job,
+            hr_systems=HRSystem(education_system=hr_system_input.strip())
+        )
+        
+        for t, p, s in exp_inputs:
+            if t.strip():
+                skills = [skill.strip() for skill in s.split(",")] if s else []
+                profile.experiences.append(Experience(category="経験", title=t, period=p, skills_acquired=skills))
+                
+        if gaku_title:
+            profile.es_points.append(StrategicPoint(title=f"ガクチカ: {gaku_title}", focus_experience=gaku_focus, target_skills=[gaku_title]))
+        if pr_title:
+            profile.es_points.append(StrategicPoint(title=f"自己PR: {pr_title}", focus_experience=pr_focus, target_skills=[pr_title]))
+            
+        profile.career_vision.short_term_goals = [st_goal] if st_goal else []
+        profile.career_vision.mid_long_goals = [ml_goal] if ml_goal else []
+        if vision_ultimate: profile.career_vision.ultimate_vision = vision_ultimate
+
+        st.markdown("---")
+        status_box = st.status("🚀 利用可能な最適なAIモデルを判定して自動生成中...（所要時間：約30〜45秒）", expanded=True)
+        
+        try:
+            status_box.write("⚙️ ステップ 1/2: ルート航図（Mermaid図解）を設計中...（約15秒）")
+            mermaid_res = generate_mermaid_by_ai(clean_api_key, profile)
+            
+            status_box.write("⚙️ ステップ 2/2: AI面接対策 8つのQ&Aを生成中...（約20秒）")
+            qa_res = generate_interview_qa(clean_api_key, profile)
+            
+            status_box.update(label="✅ 生成完了！", state="complete", expanded=False)
+
+            st.session_state.mermaid_code = mermaid_res
+            st.session_state.qa_results = qa_res
+            st.session_state.target_company = target_company.strip()
+            st.session_state.target_job = target_job
+            st.session_state.generated = True
+
+        except Exception as global_e:
+            status_box.update(label="❌ 通信エラーが発生しました", state="error", expanded=True)
+            st.error(f"接続に失敗しました: {global_e}")
+            st.warning("🔄 フォーム送信ボタンを再度押してリトライしてください。")
+            return
+
+    if st.session_state.generated:
+        mermaid_code = st.session_state.mermaid_code
+        qa_results = st.session_state.qa_results
+        saved_company = st.session_state.target_company
+        saved_job = st.session_state.target_job
+
+        map_file_name = "ルート航図_マップ.html"
+        qa_file_name = "ルート航図_面接対策.txt"
+
+        st.success("🎉 あなた専用のオリジナル・ルート航図が完成しました！")
+        st.info("💡 **アドバイス:** 出力されたルート航図（Root Mapping）を頭に入れて、想定外の質問にも根拠を提示して答えましょう！")
+        
+        if logo_filename:
+            st.image(logo_filename, width=350)
+            
+        st.markdown("```mermaid\n" + mermaid_code + "\n```")
+
+        # トリプルクォート排除のHTML生成
+        company_name_html = saved_company if saved_company else 'キャリア設計'
+        html_lines = [
+            "<!DOCTYPE html>",
+            "<html lang='ja'>",
+            "<head>",
+            "    <meta charset='utf-8'>",
+            "    <title>ルート航図マップ</title>",
+            "    <script src='https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js'></script>",
+            "    <script>mermaid.initialize({startOnLoad:true});</script>",
+            "    <style>",
+            "        body { font-family: sans-serif; padding: 20px; text-align: center; background-color: #ffffff; }",
+            "        h1 { color: #333; }",
+            "        .mermaid { display: inline-block; margin-top: 20px; }",
+            "    </style>",
+            "</head>",
+            "<body>",
+            f"    <h1>ルート航図マップ（{company_name_html}）</h1>",
+            "    <div class='mermaid'>",
+            mermaid_code,
+            "    </div>",
+            "</body>",
+            "</html>"
+        ]
+        html_map_content = "\n".join(html_lines)
+
+        st.download_button(
+            label="📥 ルート航図（マップHTML）を保存する",
+            data=html_map_content,
+            file_name=map_file_name,
+            mime="text/html"
+        )
+
+        st.markdown("---")
+        st.header("💡 AI面接対策 Q&A（8つの主要テーマ）")
+        
+        download_text = f"【Root Mapping キャリアシート】\n志望企業: {saved_company}\n希望職種: {saved_job}\n\n■ 面接対策Q&A\n"
+
+        if qa_results and "error" not in qa_results[0]:
+            for i, qa in enumerate(qa_results):
+                st.subheader(f"📌 {qa.get('theme', f'テーマ {i+1}')}")
+                st.markdown(f"**🤖 面接官:**\n「{qa.get('question', '')}」")
+                st.markdown(f"**🗣️ 回答案:**\n{qa.get('answer_script', '')}")
+                st.info(f"**💡 アドバイス:**\n{qa.get('advice', '')}")
+                st.markdown("---")
+                    
+                download_text += f"\n--- {qa.get('theme', '')} ---\n質問: {qa.get('question', '')}\n回答: {qa.get('answer_script', '')}\nアドバイス: {qa.get('advice', '')}\n"
+        else:
+            err_msg = qa_results[0].get("error", "不明なエラー") if qa_results else "生成エラー"
+            st.error(f"面接対策の生成中にエラーが発生しました。（エラー内容: {err_msg}）")
+
+        st.subheader("📄 結果の保存・PDF化")
+        st.info("💡 **PDFとして保存・印刷する場合:** ブラウザで **`Ctrl` + `P`** （Macは `Cmd` + `P`）を押してください。送信先を「PDFに保存」に切り替えることで綺麗なPDFになります。")
+        
+        st.download_button(
+            label="📥 面接対策Q&Aをテキスト保存する",
+            data=download_text,
+            file_name=qa_file_name,
+            mime="text/plain"
+        )
+
+if __name__ == "__main__":
+    main()
