@@ -1,8 +1,8 @@
 import os
 import json
 import time
+import requests  # ← Google SDKの代わりに標準の通信モジュールを使用します
 import streamlit as st
-from google import genai
 from dataclasses import dataclass, field
 from typing import List, Dict
 
@@ -43,73 +43,75 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ 全モデル総当たり型通信処理 (404/403回避)
+# ⚙️ Direct REST API 通信処理（SDKのバグを完全回避）
 # ==========================================
 def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) -> str:
-    client = genai.Client(api_key=api_key)
-    
-    # API環境によって受け付けるモデル名が異なるため、あらゆるバリエーションを網羅
+    # 安定稼働している確実なモデルに絞ってトライします
     models_to_try = [
-        "gemini-1.5-flash-002",
-        "gemini-1.5-flash-001",
-        "gemini-1.5-flash-latest",
         "gemini-1.5-flash",
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-pro-002",
-        "gemini-1.5-pro-001",
-        "gemini-1.5-pro-latest",
+        "gemini-2.0-flash-exp",
         "gemini-1.5-pro",
         "gemini-pro"
     ]
     
-    max_retries = 2 # 混雑時のリトライは2回にし、サクサク次のモデルを試す
+    max_retries = 2
     last_error = ""
 
     for model_name in models_to_try:
-        status_box.write(f"🤖 モデル [{model_name}] をテスト中...")
+        status_box.write(f"🤖 モデル [{model_name}] へ直接通信を試みています...")
         wait_time = 2
+        
+        # 最も安定している v1beta のエンドポイントを直接叩く
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+        headers = {'Content-Type': 'application/json'}
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}]
+        }
         
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
                     status_box.write(f"🔄 {task_name}: [{model_name}] 混雑再試行... ({attempt}/{max_retries-1})")
                     
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt
-                )
+                # SDKを使わず標準的なHTTPリクエストを送信
+                response = requests.post(url, headers=headers, json=payload, timeout=40)
                 
-                if response and response.text:
-                    status_box.write(f"✅ {task_name}: [{model_name}] で接続成功！")
-                    return response.text.strip()
-                    
-            except Exception as e:
-                error_msg = str(e)
-                last_error = error_msg
-                
-                # 503 (混雑) や 429 (制限) の場合は少し待ってリトライ
-                if "503" in error_msg or "UNAVAILABLE" in error_msg or "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                    if attempt < max_retries - 1:
-                        time.sleep(wait_time)
-                        wait_time += 2
-                        continue
-                    else:
-                        status_box.write(f"⚠️ [{model_name}] は混雑中のためスキップします。")
-                        break # このモデルは諦めて次へ
+                if response.status_code == 200:
+                    data = response.json()
+                    try:
+                        text = data['candidates'][0]['content']['parts'][0]['text']
+                        status_box.write(f"✅ {task_name}: [{model_name}] で生成成功！")
+                        return text.strip()
+                    except (KeyError, IndexError):
+                        last_error = "レスポンスの形式が想定外、またはAIの安全フィルターでブロックされました。"
+                        status_box.write(f"⚠️ [{model_name}] 出力がブロックされました。次を試します。")
+                        break # 次のモデルへ
                         
-                # 404 (見つからない), 403 (権限なし), 400 (不正な要求) の場合はリトライせず即スキップ
-                elif "404" in error_msg or "NOT_FOUND" in error_msg or "403" in error_msg or "400" in error_msg:
-                    status_box.write(f"⏭️ [{model_name}] は環境に適応していないためスキップします。")
-                    break # このモデルは諦めて次へ
-                    
                 else:
-                    # その他の予期せぬエラーも一旦スキップして次を試す
-                    status_box.write(f"⚠️ [{model_name}] で不明なエラー。次を試します。")
-                    break
+                    error_msg = response.text
+                    last_error = f"HTTP {response.status_code}: {error_msg}"
+                    
+                    if response.status_code in [503, 429]:
+                        if attempt < max_retries - 1:
+                            time.sleep(wait_time)
+                            wait_time += 2
+                            continue
+                        else:
+                            status_box.write(f"⚠️ [{model_name}] は混雑中のためスキップします。")
+                            break
+                    elif response.status_code in [404, 403, 400]:
+                        status_box.write(f"⏭️ [{model_name}] は非対応のためスキップします。")
+                        break
+                    else:
+                        status_box.write(f"⚠️ [{model_name}] 通信エラー ({response.status_code})。次へ。")
+                        break
+                        
+            except requests.exceptions.RequestException as e:
+                last_error = f"ネットワークエラー: {str(e)}"
+                status_box.write(f"⚠️ [{model_name}] 接続失敗。次を試します。")
+                break
 
-    # 全モデルが全滅した場合
-    raise Exception(f"すべてのAIモデルが利用できませんでした。APIキーの設定や権限をご確認ください。\n最後のエラー詳細: {last_error}")
+    raise Exception(f"すべてのAIモデルで通信に失敗しました。APIキーが有効かご確認ください。\n最後のエラー詳細: {last_error}")
 
 # ==========================================
 # 2. Gemini API 連携 (Mermaid図解 ＆ Q&A生成)
