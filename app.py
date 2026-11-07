@@ -43,14 +43,13 @@ class StudentProfile:
     career_vision: CareerVision = field(default_factory=CareerVision)
 
 # ==========================================
-# ⚙️ 最新API対応：Direct REST API 通信処理
+# ⚙️ 指定最新モデル対応：Direct REST API 通信処理
 # ==========================================
 def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) -> str:
-    # 現在公式に提供されている最新モデル名のみを指定
+    # APIのエラーメッセージで指示された最新モデルを優先順位順に設定
     models_to_try = [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.0-flash"
+        "gemini-3.8-flash",
+        "gemini-3.1-pro-preview"
     ]
     
     max_retries = 3
@@ -91,10 +90,10 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
                     if response.status_code in [503, 429]:
                         if attempt < max_retries - 1:
                             time.sleep(wait_time)
-                            wait_time += 2
+                            wait_time *= 2  # 待機時間を段階的に延長
                             continue
                         else:
-                            status_box.write(f"⚠️ [{model_name}] 混雑中 ({response.status_code})。次のモデルを試します。")
+                            status_box.write(f"⚠️ [{model_name}] 混雑中 ({response.status_code})。次の予備モデルを試します。")
                             break
                     elif response.status_code in [404, 403, 400]:
                         status_box.write(f"⚠️ [{model_name}] HTTP {response.status_code} - {error_msg}")
