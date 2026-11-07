@@ -235,7 +235,6 @@ def main():
 
         st.markdown("---")
         st.header("⚙️ API設定")
-        # Secretsにキー設定があれば読み込み、無ければ手動入力
         default_api_key = st.secrets.get("GEMINI_API_KEY", "") if hasattr(st, "secrets") else ""
         api_key_input = st.text_input("Gemini APIキー", value=default_api_key, type="password", placeholder="設定済みの場合は入力不要")
         api_key = api_key_input if api_key_input else default_api_key
@@ -256,10 +255,10 @@ def main():
             break
             
     if logo_filename:
-        st.image(logo_filename, width=220)
+        st.image(logo_filename, width=350)
 
-    # 📌 タイトルと商標表示（35類、41類、42類）
-    st.title("Root Mapping（ルート航図）作成ツール 【完全版】")
+    # 📌 タイトル（「完全版」を削除）と商標表示（35類、41類、42類）
+    st.title("Root Mapping（ルート航図）作成ツール")
     st.caption("※「ルート航図」「Root Mapping」は登録商標（35類、41類、42類）出願中です。")
 
     st.header("1. 基本情報・プロファイル入力")
@@ -367,7 +366,7 @@ def main():
         st.info("💡 **アドバイス:** 出力されたルート航図（Root Mapping）を頭に入れて、想定外の質問にも根拠を提示して答えましょう！")
         
         if logo_filename:
-            st.image(logo_filename, width=150)
+            st.image(logo_filename, width=250)
             
         st.markdown(f"```mermaid\n{mermaid_code}\n```")
 
