@@ -147,7 +147,7 @@ def build_qa_pdf(company_name: str, target_job: str, qa_results: list) -> Option
         return None
 
 # ==========================================
-# ⚙️ 爆速・自動最適化 API 通信処理
+# ⚙️ 自動最適化 API 通信処理 (賢いモデルを優先)
 # ==========================================
 def get_available_models(api_key: str) -> List[str]:
     try:
@@ -162,12 +162,12 @@ def get_available_models(api_key: str) -> List[str]:
                 if "generateContent" in methods and not any(k in name for k in ["tts", "embedding", "bison", "imagen", "audio"]):
                     models.append(name)
             
+            # 【修正】賢く指示に忠実なモデルを最優先に変更
             priority_order = [
-                "gemini-flash-lite-latest",
+                "gemini-2.0-flash",
                 "gemini-1.5-flash",
                 "gemini-flash-latest",
-                "gemini-3.8-flash",
-                "gemini-2.0-flash"
+                "gemini-flash-lite-latest"
             ]
             
             sorted_models = []
@@ -183,7 +183,7 @@ def get_available_models(api_key: str) -> List[str]:
     except Exception:
         pass
     
-    return ["gemini-flash-lite-latest", "gemini-1.5-flash", "gemini-flash-latest", "gemini-3.8-flash"]
+    return ["gemini-1.5-flash", "gemini-flash-latest"]
 
 def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) -> str:
     models_to_try = get_available_models(api_key)
@@ -203,13 +203,13 @@ def generate_text_safe(api_key: str, prompt: str, task_name: str, status_box) ->
                 if attempt > 0:
                     status_box.write(f"🔄 {task_name}: [{model_name}] 再接続中... ({attempt}/{max_retries-1}回目)")
                     
-                response = requests.post(url, headers=headers, json=payload, timeout=35)
+                response = requests.post(url, headers=headers, json=payload, timeout=40)
                 
                 if response.status_code == 200:
                     data = response.json()
                     try:
                         text = data['candidates'][0]['content']['parts'][0]['text']
-                        status_box.write(f"✅ {task_name}: [{model_name}] で即座に生成成功！")
+                        status_box.write(f"✅ {task_name}: [{model_name}] で生成成功！")
                         return text.strip()
                     except (KeyError, IndexError):
                         last_error = "レスポンス解析エラー"
@@ -260,10 +260,11 @@ def generate_interview_qa(api_key: str, profile: StudentProfile, status_box) -> 
     st_goals_str = ', '.join(profile.career_vision.short_term_goals)
     ml_goals_str = ', '.join(profile.career_vision.mid_long_goals)
 
+    # 【修正】出力形式の指示をより強力に指定
     prompt_lines = [
         "あなたはプロのキャリアアドバイザーです。以下の学生のプロフィールをもとに、面接官がしそうな質問と、学生が答えるべき回答案、およびアドバイスを生成してください。",
         "必ず以下の8つのテーマ全てについて生成し、指定のJSON配列（[ { ... } ]）形式で出力してください。",
-        "※AIの挨拶や補足説明は一切不要です。JSONデータのみを出力してください。",
+        "※重要: AIの挨拶、補足説明、マークダウン記法(```json)などは一切不要です。必ず最初の文字を `[` 、最後の文字を `]` とした純粋なJSONデータのみを出力してください。",
         "",
         "【学生プロフィール】",
         f"志望企業・業界: {profile.target_company}",
@@ -287,7 +288,7 @@ def generate_interview_qa(api_key: str, profile: StudentProfile, status_box) -> 
         "7. 最終ビジョン",
         "8. 逆質問・貢献意欲",
         "",
-        "【出力JSONフォーマット】",
+        "【出力JSONフォーマット例】",
         "[",
         "  {",
         "    \"theme\": \"1. 自己PR（強みと再現性）\",",
@@ -309,9 +310,9 @@ def generate_interview_qa(api_key: str, profile: StudentProfile, status_box) -> 
         try:
             return json.loads(json_str)
         except json.JSONDecodeError as e:
-            raise Exception(f"JSONの解析に失敗しました。\n詳細: {e}")
+            raise Exception(f"JSONデータの構造解析に失敗しました。AIが不正な形式を返しました。\n詳細: {e}\nAIの回答抜粋: {text[:100]}")
     else:
-        raise Exception("AIの回答からJSONデータが見つかりませんでした。")
+        raise Exception(f"AIの回答からJSONデータが見つかりませんでした。\nAIの回答抜粋: {text[:100]}")
 
 def generate_mermaid_by_ai(api_key: str, profile: StudentProfile, status_box) -> str:
     exp_text = "\n".join([f"- {e.title} / 得た強み: {', '.join(e.skills_acquired)}" for e in profile.experiences])
@@ -415,7 +416,7 @@ def main():
 
     st.markdown("---")
 
-    # 🔒 安全対策済み APIキー制御処理（管理者キーをHTML上に一切描画させない）
+    # 🔒 安全対策済み APIキー制御処理
     secrets_api_key = st.secrets.get("GEMINI_API_KEY", "") if hasattr(st, "secrets") else ""
 
     with st.sidebar:
@@ -427,7 +428,6 @@ def main():
         )
         st.info("💡 未入力の場合はシステム共有のAPIキーが自動適用されます。")
 
-    # 入力があれば優先、なければ Secrets 内の管理者キーを使用
     api_key = user_api_key.strip() if user_api_key.strip() else secrets_api_key
 
     if "generated" not in st.session_state:
@@ -605,7 +605,6 @@ def main():
         # 📄 面接対策Q&Aの直接PDFデータ作成 (ReportLab)
         qa_pdf_bytes = build_qa_pdf(saved_company, saved_job, qa_results)
 
-        # ⬇️ 【全8つのQ&A出力完了の直下に配置】面接対策PDF ＆ テキスト保存ボタン
         col_qa_1, col_qa_2 = st.columns(2)
         with col_qa_1:
             if qa_pdf_bytes:
