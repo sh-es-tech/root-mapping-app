@@ -94,8 +94,23 @@ def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[st
     st_goals_str = ', '.join(profile.career_vision.short_term_goals)
     ml_goals_str = ', '.join(profile.career_vision.mid_long_goals)
 
-    prompt_lines = [
-        "あなたはプロのキャリアアドバイザーです。以下の学生のプロフィールをもとに、面接官がしそうな質問と、学生が答えるべき回答案、およびアドバイスを生成してください。",
-        "必ず以下の8つのテーマ全てについて生成し、指定のJSON形式で出力してください。Markdownのコードブロック(```json ... ```)で囲まないで、純粋なJSON配列のみを出力してください。",
-        "",
-        "【学生プロフィール】",
+    # 修正点：エラーが起きにくい安全な複数行文字列フォーマットを採用
+    prompt = f"""あなたはプロのキャリアアドバイザーです。以下の学生のプロフィールをもとに、面接官がしそうな質問と、学生が答えるべき回答案、およびアドバイスを生成してください。
+必ず以下の8つのテーマ全てについて生成し、指定のJSON形式で出力してください。Markdownのコードブロックで囲まないで、純粋なJSON配列のみを出力してください。
+
+【学生プロフィール】
+志望企業・業界: {profile.target_company}
+希望職種: {profile.target_job}
+経験・原体験:
+{exp_text}
+アピールポイント(ES軸):
+{es_text}
+短期目標(1〜2年目): {st_goals_str}
+中長期目標(5〜10年後): {ml_goals_str}
+入社後の制度活用: {hr_text}
+最終ビジョン: {profile.career_vision.ultimate_vision}
+
+【出力テーマ】
+1. 自己PR（強みと再現性）
+2. ガクチカ（課題解決力）
+3
