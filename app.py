@@ -91,30 +91,23 @@ def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[st
     exp_text = "\n".join([f"- {e.category} ({e.period}): {e.title} / 得た強み: {', '.join(e.skills_acquired)}" for e in profile.experiences])
     es_text = "\n".join([f"- ES軸: {es.title} / 関連経験: {es.focus_experience}" for es in profile.es_points])
     hr_text = f"活用したい社内制度: {profile.hr_systems.education_system}" if profile.hr_systems.education_system else "活用したい社内制度: 一般的な制度（異動制度、研修制度、キャリア開発・配置換えなど）"
-    
-    json_format_sample = """[
-  {
-    "theme": "1. 自己PR（強みと再現性）",
-    "question": "面接官からの質問文",
-    "answer_script": "学生の経験を活かした具体的な回答スクリプト案（150字程度）",
-    "advice": "回答時のポイントやアドバイス（80字程度）"
-  }
-]"""
+    st_goals_str = ', '.join(profile.career_vision.short_term_goals)
+    ml_goals_str = ', '.join(profile.career_vision.mid_long_goals)
 
-    prompt = f"""あなたはプロのキャリアアドバイザーです。以下の学生のプロフィールをもとに、面接官がしそうな質問と、学生が答えるべき回答案、およびアドバイスを生成してください。
+    prompt = """あなたはプロのキャリアアドバイザーです。以下の学生のプロフィールをもとに、面接官がしそうな質問と、学生が答えるべき回答案、およびアドバイスを生成してください。
 必ず以下の8つのテーマ全てについて生成し、指定のJSON形式で出力してください。Markdownのコードブロック(```json ... ```)で囲まないで、純粋なJSON配列のみを出力してください。
 
 【学生プロフィール】
-志望企業・業界: {profile.target_company}
-希望職種: {profile.target_job}
+志望企業・業界: __TARGET_COMPANY__
+希望職種: __TARGET_JOB__
 経験・原体験:
-{exp_text}
+__EXP_TEXT__
 アピールポイント(ES軸):
-{es_text}
-短期目標(1〜2年目): {', '.join(profile.career_vision.short_term_goals)}
-中長期目標(5〜10年後): {', '.join(profile.career_vision.mid_long_goals)}
-入社後の制度活用: {hr_text}
-最終ビジョン: {profile.career_vision.ultimate_vision}
+__ES_TEXT__
+短期目標(1〜2年目): __ST_GOALS__
+中長期目標(5〜10年後): __ML_GOALS__
+入社後の制度活用: __HR_TEXT__
+最終ビジョン: __VISION__
 
 【出力テーマ】
 1. 自己PR（強みと再現性）
@@ -127,7 +120,21 @@ def generate_interview_qa(api_key: str, profile: StudentProfile) -> List[Dict[st
 8. 逆質問・貢献意欲
 
 【出力JSONフォーマット】
-{json_format_sample}"""
+[
+  {
+    "theme": "1. 自己PR（強みと再現性）",
+    "question": "面接官からの質問文",
+    "answer_script": "学生の経験を活かした具体的な回答スクリプト案（150字程度）",
+    "advice": "回答時のポイントやアドバイス（80字程度）"
+  }
+]""".replace("__TARGET_COMPANY__", str(profile.target_company))\
+   .replace("__TARGET_JOB__", str(profile.target_job))\
+   .replace("__EXP_TEXT__", exp_text)\
+   .replace("__ES_TEXT__", es_text)\
+   .replace("__ST_GOALS__", st_goals_str)\
+   .replace("__ML_GOALS__", ml_goals_str)\
+   .replace("__HR_TEXT__", hr_text)\
+   .replace("__VISION__", profile.career_vision.ultimate_vision)
 
     try:
         text = generate_text_with_auto_model(client, prompt)
@@ -148,29 +155,27 @@ def generate_mermaid_by_ai(api_key: str, profile: StudentProfile) -> str:
     ml_goals = ', '.join(profile.career_vision.mid_long_goals)
     vision = profile.career_vision.ultimate_vision
     
-    mermaid_style = "%%{init: {'flowchart': {'curve': 'basis'}}}%%"
-    
-    prompt = f"""あなたはキャリア設計のプロであり、Mermaid記法（flowchart BT）を用いた図解の専門家です。
+    prompt = """あなたはキャリア設計のプロであり、Mermaid記法（flowchart BT）を用いた図解の専門家です。
 学生のプロフィールを分析し、経験、強み、入社後の目標、最終ビジョンがどのように有機的に結びついているかを、因果関係を踏まえてMermaidのコードで出力してください。
 
 【学生プロフィール】
-志望企業・職種: {profile.target_company} / {profile.target_job}
+志望企業・職種: __TARGET_COMPANY__ / __TARGET_JOB__
 ■過去の経験（原体験）
-{exp_text}
+__EXP_TEXT__
 ■ESのメインテーマ
-{es_text}
+__ES_TEXT__
 ■入社後のイメージと目標
-1〜2年目の目標: {st_goals}
-活用したい制度: {hr_text}
-5〜10年後の目標: {ml_goals}
+1〜2年目の目標: __ST_GOALS__
+活用したい制度: __HR_TEXT__
+5〜10年後の目標: __ML_GOALS__
 ■最終ビジョン
-{vision}
+__VISION__
 
 【Mermaid作成の厳格なルール】
 1. 冒頭に以下のクラス定義を必ず含めること：
-{mermaid_style}
+%%{init: {'flowchart': {'curve': 'basis'}}}%%
 flowchart BT
     classDef level1 fill:#f9f9f9,stroke:#6c757d,stroke-width:1px,rx:15,ry:15;
     classDef level2 fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,rx:20,ry:20;
     classDef level3 fill:#fff3e0,stroke:#f57c00,stroke-width:2px,rx:20,ry:20;
-    classDef level4 fill:#e8f5e9,stroke:#388e3c,
+    classDef level
